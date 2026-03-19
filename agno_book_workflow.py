@@ -38,10 +38,14 @@ MODEL_CANDIDATES = [
     "nvidia/llama-3.1-nemotron-70b-instruct",
 ]
 ACTIVE_NVIDIA_MODEL_ID = NVIDIA_MODEL_ID
-MAX_AGENT_OUTPUT_TOKENS = int(os.getenv("BOOK_AGENT_MAX_TOKENS", "4096"))
+MAX_AGENT_OUTPUT_TOKENS = int(os.getenv("BOOK_AGENT_MAX_TOKENS", "8192"))
 MIN_CHAPTERS = 7
 MAX_CHAPTERS = 10
 MAX_STAGE_RETRIES = 2
+# Chapter depth targets
+MIN_CHAPTER_WORDS = 2000
+MAX_CHAPTER_WORDS = 3500
+MIN_SECTION_PARAGRAPHS = 3  # minimum paragraphs per section (Opening Story, Teaching, etc.)
 DEFAULT_OUTPUT_ROOT = Path(os.getenv("BOOK_WORKFLOW_OUTPUT_DIR", "output"))
 
 RUNTIME_RESOURCES: Dict[str, Dict[str, Any]] = {}
@@ -51,10 +55,12 @@ class ChapterBrief(BaseModel):
     number: int = Field(..., ge=1)
     title: str
     core_teaching: str
-    story_seed: str
+    story_seed: str           # 3+ sentence narrative seed (setting, protagonist, conflict, turning point)
+    narrative_arc: str        # multi-sentence teaching progression arc for this chapter
     verse_reference: str
-    joke_seed: str
-    bridge_to_next: str
+    joke_seed: str            # warm anecdote / self-deprecating story seed (NOT a punchline)
+    bridge_to_next: str       # narrative hook leading into the next chapter
+    target_word_count: int = Field(default=2500, ge=MIN_CHAPTER_WORDS, le=MAX_CHAPTER_WORDS)
 
 
 class BookBlueprint(BaseModel):
@@ -153,9 +159,11 @@ def render_blueprint_markdown(blueprint: BookBlueprint) -> str:
                 f"### Chapter {chapter.number}: {chapter.title}",
                 f"- Core teaching: {chapter.core_teaching}",
                 f"- Story seed: {chapter.story_seed}",
+                f"- Narrative arc: {chapter.narrative_arc}",
                 f"- Verse reference: {chapter.verse_reference}",
                 f"- Joke seed: {chapter.joke_seed}",
                 f"- Bridge to next: {chapter.bridge_to_next}",
+                f"- Target word count: {chapter.target_word_count}",
                 "",
             ]
         )
@@ -294,8 +302,11 @@ def chapter_issues(chapter: ChapterDraft, expected_number: int, expected_title: 
     for marker in required_markers:
         if marker not in chapter.markdown:
             issues.append(f"Chapter {expected_number} is missing the section '{marker}'.")
-    if chapter.word_count < 700:
-        issues.append(f"Chapter {expected_number} is too short to be a complete chapter.")
+    if chapter.word_count < MIN_CHAPTER_WORDS:
+        issues.append(
+            f"Chapter {expected_number} is too short ({chapter.word_count} words). "
+            f"Minimum required: {MIN_CHAPTER_WORDS} words. Each section needs {MIN_SECTION_PARAGRAPHS}+ paragraphs."
+        )
     return issues
 
 
@@ -535,17 +546,29 @@ async def fetch_style_and_verse_for_chapter(chapter_brief: ChapterBrief, sph: MC
 def designer_agent(jnanalaya: MCPTools, sph: MCPTools) -> Agent:
     return Agent(
         name="Book Designer",
-        role="Design a book blueprint modeled semantically on Living Enlightenment.",
+        role="Design a richly detailed book blueprint modeled semantically on Living Enlightenment.",
         model=build_model(),
         instructions=[
             "You are working from pre-fetched MCP context supplied in the prompt.",
-            "Do not ask for extra tools or external data.",
-            "From Kailasa Jnanalaya, inspect Living Enlightenment structure and tone using only targeted snippets.",
-            "From SPH Books, find verse references relevant to the user's topic and assign one per chapter.",
-            f"Produce {MIN_CHAPTERS}-{MAX_CHAPTERS} chapters and keep the structure practical and teachable.",
-            "Mirror Living Enlightenment semantically, not literally. Do not copy source text.",
-            "Every chapter needs a story seed, a teaching arc, a verse anchor, a joke seed, and a bridge to the next chapter.",
-            "Set tone, speech level, speech style, and joke policy clearly for the writer and proofreader.",
+            "Do not call extra tools or fetch additional data beyond what is given.",
+            "Study the Living Enlightenment structure carefully: each chapter is a self-contained journey with"
+            " an immersive opening story, progressively deepening teaching, a concrete practice, warm humor,"
+            " and a narrative bridge into the next chapter.",
+            "From SPH Books, select one specific verse per chapter that is directly relevant to its core teaching.",
+            f"Produce exactly {MIN_CHAPTERS}-{MAX_CHAPTERS} chapters.",
+            "Mirror Living Enlightenment semantically — vivid, story-rich, practically grounded, spiritually warm."
+            " Do NOT copy source text verbatim.",
+            "For EACH chapter brief you MUST provide:",
+            "  - story_seed: AT LEAST 3 sentences describing the protagonist, setting, conflict, and turning point"
+            "    of the opening story (not a one-liner summary).",
+            "  - narrative_arc: 3-5 sentences tracing the teaching progression across the chapter"
+            "    — how the insight unfolds, deepens, and lands.",
+            "  - joke_seed: A 2-3 sentence warm anecdote or self-deprecating scenario that can be told as a story"
+            "    (NOT a punchline; think 'the guru who always forgot his keys' style).",
+            "  - bridge_to_next: 2-3 sentences forming a narrative hook that closes this chapter and"
+            "    opens a question or tension that will be resolved in the next chapter.",
+            "  - target_word_count: Set to 2500 for most chapters; use 3000 for pivotal teaching chapters.",
+            "Set tone, speech level, speech style, and joke policy so the writer can maintain consistent voice.",
         ],
         markdown=False,
         compress_tool_results=True,
@@ -556,16 +579,36 @@ def designer_agent(jnanalaya: MCPTools, sph: MCPTools) -> Agent:
 def writer_agent(jnanalaya: MCPTools, sph: MCPTools) -> Agent:
     return Agent(
         name="Book Writer",
-        role="Write a full chapter from an approved brief.",
+        role="Write a full, richly detailed chapter from an approved brief.",
         model=build_model(),
         instructions=[
             "You are working from pre-fetched MCP context supplied in the prompt.",
-            "Use Living Enlightenment as a style reference, not as text to copy.",
-            "Fetch only the minimum source snippets needed to align the chapter voice and verse anchor.",
-            "Write original prose.",
-            "Each chapter must include: Opening Story, The Teaching, Practical Exercise, Humor, Closing Bridge.",
-            "Integrate one warm joke or witty observation naturally.",
-            "Preserve the approved tone, speech level, speech style, and chapter title exactly.",
+            "Use Living Enlightenment as a STYLE REFERENCE ONLY — original prose is required.",
+            f"Every chapter MUST be between {MIN_CHAPTER_WORDS} and {MAX_CHAPTER_WORDS} words total.",
+            f"Every section MUST contain at least {MIN_SECTION_PARAGRAPHS} substantial paragraphs (80+ words each).",
+            "Section-by-section depth requirements:",
+            "  ### Opening Story (target 400-500 words):",
+            "    Write a complete short story with: vivid setting, a named protagonist, an inciting incident,"
+            "    an internal struggle, a turning point, and a resolution that makes the teaching visceral."
+            "    Do not summarise — narrate fully with sensory detail.",
+            "  ### The Teaching (target 600-800 words):",
+            "    Begin with the verse reference (quote it and unpack what it literally means)."
+            "    Then layer 3-4 teaching insights that build on each other."
+            "    Use real-world analogies (modern work, relationships, daily situations)."
+            "    End this section with a clear, memorable 'enlightenment statement'.",
+            "  ### Practical Exercise (target 350-500 words):",
+            "    Name the practice clearly. Give: intention (1 paragraph), step-by-step instructions"
+            "    (at least 5 numbered steps with 2+ sentences each), 'what you may notice' paragraph,"
+            "    and 'common pitfalls' paragraph.",
+            "  ### Humor (target 250-350 words):",
+            "    Tell a warm, 3-4 paragraph anecdote — NOT a one-liner joke."
+            "    The humor should be self-deprecating, spiritually aware, and arrive at a gentle insight."
+            "    Think: 'the kind of story a master tells that makes you laugh and then sit quietly'.",
+            "  ### Closing Bridge (target 200-300 words):",
+            "    Reflect on what shifted in this chapter (1 paragraph). Pose an open question that"
+            "    creates gentle tension. End with 1-2 sentences that gesture toward the next chapter's theme.",
+            "Preserve the approved chapter title, tone, speech level, and speech style exactly.",
+            "Write the chapter heading as: ## Chapter {N}: {Title}",
         ],
         markdown=False,
         compress_tool_results=True,
@@ -576,14 +619,23 @@ def writer_agent(jnanalaya: MCPTools, sph: MCPTools) -> Agent:
 def proofreader_agent(sph: MCPTools) -> Agent:
     return Agent(
         name="Book Proofreader",
-        role="Proofread one chapter against the approved outline and verse reference.",
+        role="Proofread and deepen one chapter against the approved brief and verse reference.",
         model=build_model(),
         instructions=[
-            "Polish the chapter without changing its intent or chapter order.",
-            "You are working from pre-fetched MCP context supplied in the prompt.",
-            "Keep the chapter sections intact: Opening Story, The Teaching, Practical Exercise, Humor, Closing Bridge.",
-            "Tighten grammar, clarity, pacing, and alignment with the approved speech style.",
-            "Return the complete revised chapter only.",
+            "You are the final depth-and-polish pass for a spiritually rich book chapter.",
+            "You are working from pre-fetched context supplied in the prompt.",
+            "FIRST check depth before polishing:",
+            f"  - If any section has fewer than {MIN_SECTION_PARAGRAPHS} paragraphs, EXPAND it with richer narrative,"
+            f"    deeper insight, or additional examples until it meets the {MIN_SECTION_PARAGRAPHS}-paragraph minimum.",
+            f"  - If the chapter total word count is below {MIN_CHAPTER_WORDS}, expand the thinnest sections first.",
+            "THEN polish:",
+            "  - Tighten grammar and fix awkward phrasing.",
+            "  - Ensure the verse reference in 'The Teaching' is properly quoted and explained.",
+            "  - Ensure 'Humor' is a warm anecdote (3-4 paragraphs), NOT a one-liner joke."
+            "    If it is a punchline, rewrite it as a storytelling anecdote.",
+            "  - Verify 'Closing Bridge' ends with a narrative hook toward the next chapter.",
+            "Keep all five sections intact: Opening Story, The Teaching, Practical Exercise, Humor, Closing Bridge.",
+            "Return the COMPLETE revised chapter markdown only — no commentary, no preamble.",
         ],
         markdown=False,
         compress_tool_results=True,
@@ -594,13 +646,19 @@ def proofreader_agent(sph: MCPTools) -> Agent:
 def administrator_agent() -> Agent:
     return Agent(
         name="Book Administrator",
-        role="Micromanage the book pipeline with explicit approval and revision guidance.",
+        role="Review the book pipeline with quality checkpoints focused on depth and coherence.",
         model=build_model(),
         instructions=[
-            "You are the strict administrator for a multi-agent book workflow.",
-            "Approve only when the current stage is complete, coherent, and aligned to the topic.",
-            "When rejecting, provide specific, targeted revision notes for only the failing stage.",
-            "Do not rewrite the whole book during review. Focus on validation, risk detection, and actionable guidance.",
+            "You are the strict quality gatekeeper for a multi-agent book workflow.",
+            f"REJECT any chapter with fewer than {MIN_CHAPTER_WORDS} words — depth is non-negotiable.",
+            f"REJECT any blueprint chapter brief whose story_seed is a single sentence — require 3+ sentences.",
+            "When reviewing a blueprint: check that every chapter has a multi-sentence story_seed, a narrative_arc,"
+            " a verse_reference, and a bridge_to_next that creates narrative tension.",
+            "When reviewing chapter drafts: check word count, section completeness, verse integration,"
+            " and humor style (must be anecdote, not punchline).",
+            "When rejecting, provide SPECIFIC revision notes: name the exact section and exactly what is missing."
+            " Do NOT give general feedback like 'improve depth' — say 'Chapter 3 Opening Story needs 2 more paragraphs'.",
+            "Approve only when depth targets are met and the content is coherent with the approved blueprint.",
         ],
         markdown=False,
     )
@@ -614,11 +672,20 @@ async def run_designer(topic: str, revision_notes: str, jnanalaya: MCPTools, sph
         Design a book blueprint for the topic: {topic}
 
         Requirements:
-        - Use Living Enlightenment from Kailasa Jnanalaya as the structural inspiration.
-        - Use SPH Books for verse references.
+        - Use Living Enlightenment from Kailasa Jnanalaya as the structural and tonal inspiration.
+        - Use SPH Books for verse references — one specific verse per chapter.
         - Constrain the plan to {MIN_CHAPTERS}-{MAX_CHAPTERS} chapters.
-        - Make the book vivid, practical, humorous, and spiritually readable.
-        - The writing should feel story-rich and engaging.
+        - Make the book vivid, practically grounded, humorous in the storytelling sense, and spiritually rich.
+
+        CRITICAL FIELD REQUIREMENTS for each chapter brief:
+        - story_seed: Minimum 3 sentences. Describe: WHO is the protagonist (name them), WHERE are they,
+          WHAT is the conflict or struggle they face, and WHAT turning point occurs. Not a one-liner.
+        - narrative_arc: Minimum 3 sentences. Trace how the teaching insight unfolds across the chapter:
+          opening confusion → first insight → deeper understanding → practical realisation.
+        - joke_seed: A 2-3 sentence warm storytelling scenario (NOT a punchline joke).
+          Think: a self-deprecating story a wise teacher might tell about themselves.
+        - bridge_to_next: 2-3 sentences creating narrative tension that will be resolved in the next chapter.
+        - target_word_count: 2500 for standard chapters, 3000 for key teaching chapters.
 
         Prefetched Living Enlightenment context:
         {reference_context}
@@ -627,7 +694,7 @@ async def run_designer(topic: str, revision_notes: str, jnanalaya: MCPTools, sph
         {verse_context}
 
         Revision notes from the administrator:
-        {revision_notes or "None. Create the best first-pass blueprint."}
+        {revision_notes or "None. Create the richest possible first-pass blueprint."}
         """
     )
     response = await designer_agent(jnanalaya, sph).arun(prompt, output_schema=BookBlueprint)
@@ -670,8 +737,18 @@ async def write_single_chapter(
     revision_notes: str,
     jnanalaya: MCPTools,
     sph: MCPTools,
+    prior_chapter_summaries: Optional[List[str]] = None,
 ) -> ChapterDraft:
     chapter_context = await fetch_style_and_verse_for_chapter(chapter_brief, sph)
+    prior_context_block = ""
+    if prior_chapter_summaries:
+        prior_lines = "\n".join(f"  - {s}" for s in prior_chapter_summaries)
+        prior_context_block = dedent(
+            f"""\
+            Previously written chapters (maintain continuity and build on these threads):
+            {prior_lines}
+            """
+        )
     prompt = dedent(
         f"""\
         Write chapter {chapter_brief.number} for a book about: {topic}
@@ -687,13 +764,17 @@ async def write_single_chapter(
         Chapter brief:
         {chapter_brief.model_dump_json(indent=2)}
 
+        TARGET: {chapter_brief.target_word_count} words for this chapter.
+        Every section MUST have at least {MIN_SECTION_PARAGRAPHS} substantial paragraphs.
+
+        {prior_context_block}
         Revision notes from the administrator:
-        {revision_notes or "None. Write the chapter cleanly from the approved brief."}
+        {revision_notes or "None. Write the chapter with maximum depth and richness from the approved brief."}
 
         Prefetched verse/reference context:
         {chapter_context}
 
-        Output markdown with this exact section layout:
+        Output markdown with this EXACT section layout (include all five sections):
         ## Chapter {chapter_brief.number}: {chapter_brief.title}
         ### Opening Story
         ### The Teaching
@@ -763,7 +844,7 @@ async def proofread_single_chapter(
     chapter_context = await fetch_style_and_verse_for_chapter(chapter_brief, sph)
     prompt = dedent(
         f"""\
-        Proofread chapter {chapter_brief.number} for the topic: {topic}
+        Proofread and deepen chapter {chapter_brief.number} for the topic: {topic}
 
         Book-level guidance:
         - Tone: {blueprint.tone}
@@ -774,11 +855,14 @@ async def proofread_single_chapter(
         Approved chapter brief:
         {chapter_brief.model_dump_json(indent=2)}
 
-        Current chapter draft:
-        {draft.model_dump_json(indent=2)}
+        Target word count: {chapter_brief.target_word_count} words
+        Minimum section depth: {MIN_SECTION_PARAGRAPHS} paragraphs per section
+
+        Current chapter draft (markdown):
+        {draft.markdown}
 
         Revision notes from the administrator:
-        {revision_notes or "None. Polish the chapter for final compilation."}
+        {revision_notes or "None. Deepen thin sections then polish for final compilation."}
 
         Prefetched verse/reference context:
         {chapter_context}
@@ -955,11 +1039,12 @@ async def write_chapters_loop(step_input: StepInput) -> StepOutput:
     topic = state["topic"]
     blueprint = BookBlueprint.model_validate(state["blueprint"])
     chapters: List[ChapterDraft] = []
+    prior_summaries: List[str] = []  # rolling list for narrative continuity
 
     print("  Stage: Writer")
     draft_dir = ensure_dir(Path(state["artifact_paths"]["draft_dir"]))
     for chapter_brief in blueprint.chapters:
-        print(f"    Writing chapter {chapter_brief.number}/{blueprint.chapter_count}...")
+        print(f"    Writing chapter {chapter_brief.number}/{blueprint.chapter_count} (target {chapter_brief.target_word_count} words)...")
         draft = await write_single_chapter(
             topic=topic,
             blueprint=blueprint,
@@ -967,9 +1052,12 @@ async def write_chapters_loop(step_input: StepInput) -> StepOutput:
             revision_notes="",
             jnanalaya=runtime["jnanalaya"],
             sph=runtime["sph"],
+            prior_chapter_summaries=prior_summaries if chapter_brief.number > 1 else None,
         )
         chapters.append(draft)
+        prior_summaries.append(f"Ch {chapter_brief.number} '{draft.title}': {draft.summary}")
         write_text(draft_dir / f"{chapter_brief.number:02d}_{slugify(chapter_brief.title)}.md", draft.markdown)
+        print(f"      → {draft.word_count} words written.")
         await asyncio.sleep(1)
 
     state["drafts"] = [chapter.model_dump() for chapter in chapters]
@@ -1250,10 +1338,11 @@ class WriteChaptersExecutor:
         bundle = bundle_from_step_input(step_input)
         blueprint = BookBlueprint.model_validate(bundle["blueprint"])
         drafts: List[ChapterDraft] = []
+        prior_summaries: List[str] = []  # rolling list for narrative continuity
         print("  Stage: Writer")
         draft_dir = ensure_dir(Path(bundle["artifact_paths"]["draft_dir"]))
         for chapter_brief in blueprint.chapters:
-            print(f"    Writing chapter {chapter_brief.number}/{blueprint.chapter_count}...")
+            print(f"    Writing chapter {chapter_brief.number}/{blueprint.chapter_count} (target {chapter_brief.target_word_count} words)...")
             draft = await write_single_chapter(
                 topic=bundle["topic"],
                 blueprint=blueprint,
@@ -1261,9 +1350,12 @@ class WriteChaptersExecutor:
                 revision_notes="",
                 jnanalaya=self.runtime.jnanalaya,
                 sph=self.runtime.sph,
+                prior_chapter_summaries=prior_summaries if chapter_brief.number > 1 else None,
             )
             drafts.append(draft)
+            prior_summaries.append(f"Ch {chapter_brief.number} '{draft.title}': {draft.summary}")
             write_text(draft_dir / f"{chapter_brief.number:02d}_{slugify(chapter_brief.title)}.md", draft.markdown)
+            print(f"      → {draft.word_count} words written.")
             await asyncio.sleep(1)
         bundle["drafts"] = [chapter.model_dump() for chapter in drafts]
         return StepOutput(content=bundle)
