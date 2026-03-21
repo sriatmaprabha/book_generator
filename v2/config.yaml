@@ -1,0 +1,73 @@
+# ============================================================================
+# Book Generator v2 — Central Agent Configuration
+# ============================================================================
+# Each agent has its own model, base_url, and api_key settings.
+# Environment variables can be referenced with ${ENV_VAR} syntax.
+# ============================================================================
+
+# --- Global defaults (inherited by agents unless overridden) ----------------
+defaults:
+  model: "openai/gpt-oss-120b"
+  base_url: "https://integrate.api.nvidia.com/v1"
+  api_key: "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"
+  max_tokens: 8192
+
+# --- Per-agent overrides ----------------------------------------------------
+agents:
+  intake:
+    # Fast model for input validation — doesn't need heavy reasoning
+    model: "openai/gpt-oss-120b"
+    # base_url: inherits from defaults
+    # api_key: inherits from defaults
+    max_tokens: 2048
+
+  architect:
+    # Strong model for book structure design
+    model: "openai/gpt-oss-120b"
+    max_tokens: 8192
+
+  researcher:
+    # Strong model with tool access for gathering source material
+    # Needs very high tokens because MCP tool definitions + SWAMIJI_VOICE + instructions are large
+    model: "openai/gpt-oss-120b"
+    max_tokens: 16384
+
+  writer:
+    # Creative model — needs large output for full chapters
+    model: "openai/gpt-oss-120b"
+    max_tokens: 12288
+
+  editor:
+    # Strong model for polishing and expansion
+    model: "openai/gpt-oss-120b"
+    max_tokens: 10240
+
+  qa:
+    # QA reviewer — needs large context to read entire book + reference samples
+    model: "openai/gpt-oss-120b"
+    max_tokens: 16384
+
+  designer:
+    # Code-capable model for generating python-docx code
+    model: "openai/gpt-oss-120b"
+    max_tokens: 4096
+
+# --- MCP Sources ------------------------------------------------------------
+mcp_sources:
+  - name: "Kailasa Jnanalaya"
+    url: "https://jnanalaya.kailasa.ai/mcp"
+    transport: "streamable-http"
+  - name: "SPH Books"
+    url: "https://jnanalaya.nithyananda.ai/mcp"
+    transport: "streamable-http"
+
+# --- Workflow settings -------------------------------------------------------
+workflow:
+  max_stage_retries: 2
+  min_chapter_words: 2000
+  max_chapter_words: 5000
+  min_section_paragraphs: 3
+  output_dir: "output"
+  writer_batch_size: 3          # chapters written before summarizing for next batch
+  parallel_research: true       # research all chapters concurrently
+  parallel_editing: true        # edit all chapters concurrently

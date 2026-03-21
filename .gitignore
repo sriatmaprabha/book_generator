@@ -1,0 +1,27 @@
+# Generated output (large, not source code)
+v2/output/
+v1/output/
+
+# Transcripts (user-uploaded, not source code)
+v2/transcripts_*/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+~$*
+
+# Logs
+*.log
+v1/designer_trace*.log
+v1/full_run.log
