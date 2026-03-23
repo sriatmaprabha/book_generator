@@ -3,7 +3,9 @@ v2/output/
 v1/output/
 
 # Transcripts (user-uploaded, not source code)
-v2/transcripts_*/
+v2/transcripts_feb*/
+# Keep the transcript book generator (it's source code)
+!v2/transcripts_book_generator/
 
 # Python
 __pycache__/

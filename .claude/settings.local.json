@@ -29,7 +29,14 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\(''compile_satsang.py''\\).read\\(\\)\\); print\\(''Syntax OK''\\)\")",
       "Bash(python compile_satsang.py --dir transcripts_feb2026)",
       "Bash(python -c \"import ast; ast.parse\\(open\\(''compile_satsang.py''\\).read\\(\\)\\); print\\(''OK''\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\(''compile_satsang.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''OK''\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''compile_satsang.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(ls:*)",
+      "Bash(wc -l /d/book_generator/v2/*.py)",
+      "Bash(mkdir -p transcripts_book_generator)",
+      "Bash(cp compile_satsang.py transcripts_book_generator/compile_satsang.py)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''transcripts_book_generator/compile_satsang.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(python transcripts_book_generator/compile_satsang.py --dir transcripts_feb2026)",
+      "Bash(PYTHONPATH=. python transcripts_book_generator/compile_satsang.py --dir transcripts_feb2026)"
     ]
   }
 }
