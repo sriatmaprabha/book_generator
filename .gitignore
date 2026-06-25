@@ -11,6 +11,10 @@ v2/transcripts_feb*/
 .env
 .env.local
 
+# Python virtualenvs
+venv*/
+.venv*/
+
 # Python
 __pycache__/
 *.pyc

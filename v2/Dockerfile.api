@@ -1,0 +1,24 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System deps for python-docx (lxml) and mammoth
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libxml2-dev libxslt1-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir \
+        fastapi \
+        "uvicorn[standard]" \
+        mammoth \
+        aiofiles
+
+# Copy all pipeline source files
+COPY . .
+
+EXPOSE 8000
+
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
