@@ -134,6 +134,39 @@ class ChapterBrief(BaseModel):
         description="Per-chapter word target (inherits from BookConfig.words_per_chapter unless overridden)",
     )
 
+    # ── Book structure fields ──────────────────────────────────────────────
+    chapter_type: str = Field(
+        "main",
+        description=(
+            "Role of this chapter in the book structure. "
+            "One of: 'preface' | 'introduction' | 'preliminary' | 'main' | 'conclusion'"
+        ),
+    )
+    section_group: str = Field(
+        "",
+        description=(
+            "The named section this chapter belongs to, e.g. 'Part I: The Ground of Being'. "
+            "Chapters with the same section_group are rendered under one section divider page."
+        ),
+    )
+
+
+class BookSectionGroup(BaseModel):
+    """A named section grouping chapters — renders as a divider page in the .docx."""
+
+    label: str = Field(
+        ...,
+        description="Section title shown on the divider page, e.g. 'Part I: The Ground of Being'",
+    )
+    chapter_numbers: List[int] = Field(
+        ...,
+        description="Ordered list of chapter numbers that belong to this section",
+    )
+    description: str = Field(
+        "",
+        description="1-2 sentences describing what this section covers — printed under the label",
+    )
+
 
 class BookBlueprint(BaseModel):
     """The complete book design — output of the Architect agent."""
@@ -148,6 +181,10 @@ class BookBlueprint(BaseModel):
         description="Images, phrases, or ideas that recur across chapters for cohesion",
     )
     chapters: List[ChapterBrief]
+    sections: List[BookSectionGroup] = Field(
+        default_factory=list,
+        description="Named section groups — each renders as a divider page before its first chapter",
+    )
     voice_notes: str = Field(
         "",
         description="Guidance for the Writer on tone, speech patterns, humor policy, etc.",
@@ -155,6 +192,15 @@ class BookBlueprint(BaseModel):
 
 
 # ── Researcher Output ──────────────────────────────────────────────────────
+
+class SourceLink(BaseModel):
+    """A YouTube / video source link extracted from a research transcript."""
+
+    title: str = Field(..., description="Title of the satsang or video")
+    url: str = Field(..., description="Full YouTube URL (youtube.com/watch or youtu.be)")
+    date: str = Field("", description="Date of the satsang/video if available, e.g. '14 Mar 2019'")
+    chapter_number: int = Field(..., ge=1, description="Chapter that used this source")
+
 
 class ResearchPacket(BaseModel):
     """Raw material gathered for a single chapter — fed to the Writer."""
@@ -167,6 +213,10 @@ class ResearchPacket(BaseModel):
     key_facts: List[str] = Field(default_factory=list)
     anecdotes: List[str] = Field(default_factory=list)
     suggested_references: List[str] = Field(default_factory=list)
+    source_links: List[SourceLink] = Field(
+        default_factory=list,
+        description="YouTube/video links extracted from MCP transcript responses",
+    )
 
 
 # ── Writer Intermediate Outputs ────────────────────────────────────────────
@@ -273,6 +323,34 @@ class BookQAReview(BaseModel):
 
 # ── Compiled Metadata ──────────────────────────────────────────────────────
 
+class QAPair(BaseModel):
+    """A single question-and-answer pair for the end-of-chapter Q&A section."""
+
+    question: str = Field(
+        ...,
+        description="A seeker's genuine question arising from this chapter's teaching (1-2 sentences)",
+    )
+    answer: str = Field(
+        ...,
+        description="Swamiji's answer in first-person Guruvaak voice (100-200 words)",
+    )
+    source_reference: str = Field(
+        "",
+        description="Title/date of the transcript or book this answer draws from",
+    )
+
+
+class ChapterQA(BaseModel):
+    """All Q&A pairs for one chapter — appended after the chapter content."""
+
+    chapter_number: int = Field(..., ge=1)
+    chapter_title: str
+    qa_pairs: List[QAPair] = Field(
+        ..., min_length=1,
+        description="8-12 Q&A pairs covering the chapter's key teachings",
+    )
+
+
 class CompiledBookMetadata(BaseModel):
     """Final book metadata assembled after all chapters are edited."""
 
@@ -283,5 +361,9 @@ class CompiledBookMetadata(BaseModel):
     foreword: str = ""
     benediction: str = ""
     source_notes: List[str] = Field(default_factory=list)
+    all_source_links: List[SourceLink] = Field(
+        default_factory=list,
+        description="All YouTube source links across all chapters — exported for QR code generation",
+    )
     chapter_count: int = Field(..., ge=1)
     estimated_word_count: int = Field(..., ge=1)

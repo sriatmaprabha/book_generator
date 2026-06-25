@@ -2,12 +2,16 @@
 Workflow orchestrator — runs the 6-agent pipeline with session state tracking.
 
 Pipeline:
-  1. Intake      (sequential)   — validate config
-  2. Architect   (sequential)   — design blueprint
-  3. Researcher  (parallel)     — gather material per chapter
-  4. Writer      (batched)      — write chapters with rolling context
-  5. Editor      (parallel)     — polish all chapters
-  6. Designer    (sequential)   — produce .docx
+  1. Intake        (sequential)   — validate config
+  2. Architect     (sequential)   — design blueprint
+  3. Researcher    (parallel)     — gather material per chapter
+  3.5. YouTube     (sequential)   — match @SriNithyananda videos per chapter
+  4. Writer        (batched)      — write chapters with rolling context
+  5. Editor        (parallel)     — polish all chapters
+  5.5. QA Review  (sequential)   — score chapters, trigger rewrites if needed
+  5.55. Q&A Gen   (parallel)     — generate Q&A pairs per chapter
+  5.6. Frontmatter (parallel)    — generate foreword + benediction
+  6. Designer      (sequential)   — produce .docx
 
 Every agent call is traced via Tracer — full input/output logged to
   output/<run>/agent_traces.log   (human-readable)
@@ -28,27 +32,37 @@ from models import (
     AdminReview,
     BookBlueprint,
     BookConfig,
+    BookSectionGroup,
     ChapterBrief,
     ChapterDraft,
+    ChapterQA,
     CompiledBookMetadata,
     EditedChapter,
+    QAPair,
     ResearchPacket,
+    SourceLink,
 )
 from config import AppConfig, load_config
 from models import BookQAReview, ChapterQAResult, ContentDraft, StoryDraft
 from agents import (
     architect_agent,
+    benediction_agent,
     combiner_writer_agent,
     content_writer_agent,
     designer_agent,
     editor_agent,
+    foreword_agent,
     intake_agent,
     qa_agent,
+    qa_generator_agent,
+    targeted_qa_agent,
     researcher_agent,
     story_writer_agent,
     writer_agent,
+    STORY_FORMAT_CYCLE,
 )
 from tracing import Tracer
+import youtube_matcher as yt_matcher
 
 from agno.tools.mcp import MCPTools
 
@@ -185,6 +199,14 @@ class PipelineState:
         self.edited: Dict[int, EditedChapter] = {}
         self.metadata: Optional[CompiledBookMetadata] = None
         self.docx_path: Optional[Path] = None
+        # story_formats[chapter_number] = "A" | "B" | "C" | "D"
+        self.story_formats: Dict[int, str] = {}
+        # qa_locked: chapter numbers that passed QA and must not be re-evaluated
+        self.qa_locked: set = set()
+        # chapter_qa: Q&A pairs per chapter
+        self.chapter_qa: Dict[int, ChapterQA] = {}
+        # all_source_links: YouTube links collected from research packets
+        self.all_source_links: List[SourceLink] = []
 
         # Progress tracking
         self.status = {
@@ -205,6 +227,8 @@ class PipelineState:
             "rolling_summaries": self.rolling_summaries,
             "edited": {k: v.model_dump() for k, v in self.edited.items()},
             "metadata": self.metadata.model_dump() if self.metadata else None,
+            "story_formats": self.story_formats,
+            "qa_locked": list(self.qa_locked),
             "status": self.status,
         }
 
@@ -291,6 +315,37 @@ async def run_architect(
             blueprint = BookBlueprint.model_validate_json(match.group())
         else:
             raise RuntimeError("Architect agent did not produce a valid BookBlueprint.")
+
+    # Validate and report section structure
+    type_counts = {}
+    for ch in blueprint.chapters:
+        type_counts[ch.chapter_type] = type_counts.get(ch.chapter_type, 0) + 1
+
+    # If the architect didn't assign types (older runs / fallback), auto-assign sensibly
+    if not any(ch.chapter_type != "main" for ch in blueprint.chapters):
+        total = len(blueprint.chapters)
+        for i, ch in enumerate(blueprint.chapters):
+            if i == 0:
+                ch.chapter_type = "preface"
+                ch.target_word_count = cfg.workflow.preface_words
+            elif i == 1:
+                ch.chapter_type = "introduction"
+            elif i == total - 1:
+                ch.chapter_type = "conclusion"
+                ch.target_word_count = cfg.workflow.conclusion_words
+            elif i <= 2:
+                ch.chapter_type = "preliminary"
+                ch.section_group = "Part I: The Ground of Being"
+            else:
+                ch.chapter_type = "main"
+                ch.section_group = "Part II: The Core Teaching"
+        print("  Note: chapter types auto-assigned (Architect did not provide them)")
+
+    section_summary = " | ".join(f"{t}:{c}" for t, c in sorted(type_counts.items()))
+    print(f"  Chapter types: {section_summary}")
+    if blueprint.sections:
+        for sec in blueprint.sections:
+            print(f"    {sec.label}: chapters {sec.chapter_numbers}")
 
     state.blueprint = blueprint
     write_json(state.output_dir / "blueprint.json", blueprint.model_dump())
@@ -381,14 +436,99 @@ async def run_research(
             state.status["errors"].append(str(packet))
             continue
         state.research[packet.chapter_number] = packet
+        # Collect YouTube source links from each research packet
+        state.all_source_links.extend(packet.source_links)
 
     research_dir = ensure_dir(state.output_dir / "research")
     for num, packet in state.research.items():
         write_json(research_dir / f"ch_{num:02d}_research.json", packet.model_dump())
 
+    # Export all source links as a standalone file for QR code generation
+    if state.all_source_links:
+        write_json(
+            state.output_dir / "source_links.json",
+            [lnk.model_dump() for lnk in state.all_source_links],
+        )
+        print(f"  Source links extracted: {len(state.all_source_links)} YouTube URLs")
+
     print(f"  Research complete: {len(state.research)} chapters")
     state.save_snapshot()
     return state.research
+
+
+# ── Phase 3.5: YouTube Video Matching ─────────────────────────────────────
+
+async def run_youtube_matching(
+    state: PipelineState,
+    app_config: Optional[AppConfig] = None,
+) -> None:
+    """
+    Match YouTube videos from @SriNithyananda for each chapter.
+
+    Uses the YouTube Data API v3 to search for videos whose title/description
+    matches the chapter's teaching_points.  Results are appended to
+    state.all_source_links and re-exported as source_links.json.
+
+    Skipped automatically when youtube_enabled = false or the API key is absent.
+    """
+    cfg = app_config or load_config()
+    wf = cfg.workflow
+
+    if not wf.youtube_enabled:
+        print("\n  Phase 3.5: YouTube Matching — SKIPPED (youtube_enabled=false)")
+        return
+
+    api_key = wf.youtube_api_key
+    if not api_key:
+        print("\n  Phase 3.5: YouTube Matching — SKIPPED (YOUTUBE_API_KEY not set)")
+        return
+
+    print("\n  Phase 3.5: YouTube Video Matching")
+    print("  " + "-" * 50)
+    print(f"  Channel: {wf.youtube_channel_url}")
+    state.status["phase"] = "youtube_matching"
+
+    assert state.blueprint is not None, "Blueprint must be set before YouTube matching."
+
+    # Build the per-chapter data list expected by youtube_matcher
+    chapters_data = [
+        {
+            "chapter_number": brief.chapter_number,
+            "title": brief.title,
+            "teaching_points": brief.teaching_points,
+        }
+        for brief in state.blueprint.chapters
+    ]
+
+    try:
+        new_links = yt_matcher.match_videos_for_chapters(
+            chapters_data=chapters_data,
+            api_key=api_key,
+            pause_between=0.4,
+        )
+    except Exception as exc:
+        print(f"  WARNING: YouTube matching failed — {exc}")
+        print("  Continuing without YouTube source links.")
+        return
+
+    if not new_links:
+        print("  YouTube: no matching videos found.")
+        return
+
+    # De-duplicate against links already collected from research packets
+    existing_urls = {lnk.url for lnk in state.all_source_links}
+    fresh = [lnk for lnk in new_links if lnk.url not in existing_urls]
+    state.all_source_links.extend(fresh)
+
+    # Export the updated full list
+    write_json(
+        state.output_dir / "source_links.json",
+        [lnk.model_dump() for lnk in state.all_source_links],
+    )
+
+    print(f"  YouTube matching complete: {len(fresh)} new link(s) added "
+          f"({len(state.all_source_links)} total)")
+    state.save_snapshot()
 
 
 # ── Phase 4: Writing (batched sequential) ──────────────────────────────────
@@ -410,6 +550,16 @@ async def run_writing(
     draft_dir = ensure_dir(state.output_dir / "drafts")
     parts_dir = ensure_dir(state.output_dir / "drafts" / "parts")
 
+    # Pre-assign story formats deterministically — A, B, C, D, A, B, C, D...
+    # This guarantees variety regardless of what the LLM would choose on its own.
+    for idx, brief in enumerate(chapters):
+        state.story_formats[brief.chapter_number] = STORY_FORMAT_CYCLE[idx % len(STORY_FORMAT_CYCLE)]
+
+    format_preview = "  ".join(
+        f"Ch{n}={f}" for n, f in sorted(state.story_formats.items())
+    )
+    print(f"\n    Story format schedule: {format_preview}")
+
     prior_summaries: List[str] = []
 
     for i in range(0, len(chapters), batch_size):
@@ -421,12 +571,23 @@ async def run_writing(
             research = state.research.get(brief.chapter_number)
             priors = prior_summaries if brief.chapter_number > 1 else None
 
+            # Collect formats already used so the agent has full context
+            assigned_fmt = state.story_formats[brief.chapter_number]
+            formats_so_far = [
+                state.story_formats[n]
+                for n in sorted(state.story_formats)
+                if n < brief.chapter_number
+            ]
+
             # ── Step 1: Story Writer + Content Writer in PARALLEL ──────
-            print(f"      Ch {brief.chapter_number}: Story + Content writers (parallel)...")
+            print(f"      Ch {brief.chapter_number}: Story [{assigned_fmt}] + Content writers (parallel)...")
 
             story_agent = story_writer_agent(
                 state.config, state.blueprint, brief,
-                research=research, prior_summaries=priors, config=cfg,
+                research=research, prior_summaries=priors,
+                assigned_format=assigned_fmt,
+                formats_used=formats_so_far,
+                config=cfg,
             )
             content_agent = content_writer_agent(
                 state.config, state.blueprint, brief,
@@ -598,9 +759,18 @@ async def _rewrite_chapter(
 
     # Step 1: Story + Content in parallel
     print(f"        Ch {ch_num}: Rewriting (Story + Content parallel)...")
+    assigned_fmt = state.story_formats.get(ch_num)
+    formats_so_far = [
+        state.story_formats[n]
+        for n in sorted(state.story_formats)
+        if n < ch_num
+    ]
     story_ag = story_writer_agent(
         state.config, state.blueprint, enhanced_brief,
-        research=research, prior_summaries=priors, config=cfg,
+        research=research, prior_summaries=priors,
+        assigned_format=assigned_fmt,
+        formats_used=formats_so_far,
+        config=cfg,
     )
     content_ag = content_writer_agent(
         state.config, state.blueprint, enhanced_brief,
@@ -688,7 +858,13 @@ async def run_qa_review(
     tools: Optional[List[Any]] = None,
     app_config: Optional[AppConfig] = None,
 ) -> None:
-    """QA review — compares book with Living Enlightenment, triggers rewrites if needed."""
+    """
+    QA review with locked-pass protection and targeted recheck.
+
+    Round 1: Full-book QA → lock passing chapters → rewrite failing ones.
+    Round 2+: Targeted QA on ONLY rewritten chapters → locked chapters are never
+              re-evaluated, preventing regression from LLM scoring inconsistency.
+    """
     cfg = app_config or load_config()
     tracer = state.tracer
     max_retries = cfg.workflow.max_stage_retries
@@ -700,70 +876,116 @@ async def run_qa_review(
     assert state.blueprint is not None
     assert state.edited, "No edited chapters to review."
 
-    for attempt in range(max_retries + 1):
-        # Build combined book text for QA to read
-        chapters_sorted = sorted(state.edited.values(), key=lambda c: c.chapter_number)
-        book_text = "\n\n---\n\n".join(
-            f"## Chapter {ch.chapter_number}: {ch.title}\n\n{ch.content_markdown}"
-            for ch in chapters_sorted
-        )
+    # revision_notes_pending tracks notes from the last round for rewritten chapters
+    revision_notes_pending: Dict[int, str] = {}
 
-        # Run QA agent
-        agent = qa_agent(
-            state.config,
-            all_chapters_markdown=book_text,
-            tools=tools or [],
-            config=cfg,
-        )
-        response = await tracer.traced_arun(
-            agent,
-            "Review the complete book for quality against Living Enlightenment standards.",
-            phase=f"QA-Review-Round{attempt + 1}",
-            output_schema=BookQAReview,
-        )
+    for attempt in range(max_retries + 1):
+        chapters_sorted = sorted(state.edited.values(), key=lambda c: c.chapter_number)
+
+        # ── Round 1: Full-book QA ─────────────────────────────────────────
+        if attempt == 0:
+            book_text = "\n\n---\n\n".join(
+                f"## Chapter {ch.chapter_number}: {ch.title}\n\n{ch.content_markdown}"
+                for ch in chapters_sorted
+            )
+            agent = qa_agent(
+                state.config,
+                all_chapters_markdown=book_text,
+                tools=tools or [],
+                config=cfg,
+            )
+            response = await tracer.traced_arun(
+                agent,
+                "Review the complete book for quality against Living Enlightenment standards.",
+                phase="QA-Review-Round1",
+                output_schema=BookQAReview,
+            )
+
+        # ── Round 2+: Targeted QA on rewritten chapters only ─────────────
+        else:
+            rewritten_nums = set(revision_notes_pending.keys())
+            rewritten_text = "\n\n---\n\n".join(
+                f"## Chapter {ch.chapter_number}: {ch.title}\n\n{ch.content_markdown}"
+                for ch in chapters_sorted
+                if ch.chapter_number in rewritten_nums
+            )
+            # Pass full book as context (truncated) so the agent can check continuity
+            full_context = "\n\n---\n\n".join(
+                f"## Chapter {ch.chapter_number}: {ch.title} [LOCKED — already passed]"
+                for ch in chapters_sorted
+                if ch.chapter_number in state.qa_locked
+            )
+            agent = targeted_qa_agent(
+                state.config,
+                rewritten_chapters_markdown=rewritten_text,
+                full_book_context=full_context,
+                revision_notes_by_chapter=revision_notes_pending,
+                tools=tools or [],
+                config=cfg,
+            )
+            response = await tracer.traced_arun(
+                agent,
+                f"Re-check {len(rewritten_nums)} rewritten chapter(s) after QA feedback.",
+                phase=f"QA-Review-Round{attempt + 1}-Targeted",
+                output_schema=BookQAReview,
+            )
 
         if isinstance(response.content, BookQAReview):
             review = response.content
         else:
-            # If QA agent didn't return structured output, assume pass
             print("    QA agent returned unstructured response — assuming PASS")
             return
 
-        # Report results
-        failing = [ch for ch in review.chapters if not ch.passed]
-        passing = [ch for ch in review.chapters if ch.passed]
+        # Lock in any chapters that passed this round
+        newly_locked = []
+        for ch in review.chapters:
+            if ch.passed and ch.chapter_number not in state.qa_locked:
+                state.qa_locked.add(ch.chapter_number)
+                newly_locked.append(ch.chapter_number)
+
+        # Failing = only chapters that aren't locked
+        failing = [ch for ch in review.chapters if not ch.passed and ch.chapter_number not in state.qa_locked]
 
         safe_print(f"\n    QA Round {attempt + 1} Results:")
+        if attempt > 0 and state.qa_locked:
+            locked_str = ", ".join(f"Ch{n}" for n in sorted(state.qa_locked))
+            safe_print(f"      Locked (already passed): {locked_str}")
         for ch in review.chapters:
-            status = "PASS" if ch.passed else "FAIL"
+            if ch.chapter_number in state.qa_locked and ch.chapter_number not in newly_locked:
+                continue  # don't re-print locked chapters
+            status = "PASS ✓" if ch.passed else "FAIL"
             safe_print(f"      Ch {ch.chapter_number}: {status}  voice={ch.voice_score} structure={ch.structure_score} shastra={ch.shastra_score} story={ch.story_score}")
-            if ch.issues:
+            if not ch.passed and ch.issues:
                 for issue in ch.issues[:2]:
                     safe_print(f"        - {issue}")
 
         if review.book_level_notes:
             safe_print(f"    Book-level: {review.book_level_notes[:200]}")
 
-        if review.overall_approved or not failing:
-            print(f"\n    QA APPROVED — all chapters passed")
-            # Save QA report
-            write_json(
-                state.output_dir / f"qa_review_round{attempt + 1}.json",
-                review.model_dump(),
-            )
-            return
-
-        if attempt >= max_retries:
-            print(f"\n    QA: Max retries ({max_retries}) reached — proceeding with best available")
-            write_json(state.output_dir / "qa_review_final.json", review.model_dump())
-            return
-
-        # Rewrite failing chapters
-        print(f"\n    QA: {len(failing)} chapter(s) need rewrite — starting rewrite cycle...")
+        # Save this round's report
         write_json(
             state.output_dir / f"qa_review_round{attempt + 1}.json",
             review.model_dump(),
         )
+
+        # All chapters either locked or passed — done
+        total_chapters = len(state.edited)
+        if not failing and len(state.qa_locked) >= total_chapters:
+            safe_print(f"\n    QA APPROVED — all {total_chapters} chapters passed and locked")
+            return
+
+        if not failing:
+            safe_print(f"\n    QA APPROVED — no failing chapters remain")
+            return
+
+        if attempt >= max_retries:
+            safe_print(f"\n    QA: Max retries ({max_retries}) reached — proceeding with best available")
+            safe_print(f"    Locked: {sorted(state.qa_locked)} | Still failing: {[ch.chapter_number for ch in failing]}")
+            return
+
+        # Rewrite only the failing (non-locked) chapters
+        safe_print(f"\n    QA: {len(failing)} chapter(s) need rewrite — starting rewrite cycle...")
+        revision_notes_pending = {}
 
         for ch_result in failing:
             brief = next(
@@ -772,14 +994,14 @@ async def run_qa_review(
             )
             if brief is None:
                 continue
-
             rewritten = await _rewrite_chapter(
                 state, brief, ch_result.revision_notes, cfg,
             )
             state.edited[ch_result.chapter_number] = rewritten
+            revision_notes_pending[ch_result.chapter_number] = ch_result.revision_notes
 
         state.save_snapshot()
-        print(f"    Rewrite cycle complete — re-running QA...")
+        safe_print(f"    Rewrite cycle complete — running targeted QA on {len(revision_notes_pending)} chapter(s)...")
 
 
 # ── Section heading removal ────────────────────────────────────────────────
@@ -794,6 +1016,203 @@ def _strip_section_headings(markdown: str) -> str:
     """Remove internal section headings (### Opening Story, etc.) from final output.
     These are structural markers used during the pipeline but should not appear in the book."""
     return _SECTION_HEADINGS.sub("", markdown)
+
+
+# ── Phase 5.55: Q&A Generation (parallel per chapter) ────────────────────
+
+async def run_qa_generation(
+    state: PipelineState,
+    tools: Optional[List[Any]] = None,
+    app_config: Optional[AppConfig] = None,
+) -> None:
+    """Generate Q&A pairs for every chapter in parallel after QA review."""
+    cfg = app_config or load_config()
+    tracer = state.tracer
+
+    if not cfg.workflow.include_chapter_qa:
+        return
+
+    print("\n  Phase 5.55: Q&A Generation")
+    print("  " + "-" * 50)
+    state.status["phase"] = "qa_generation"
+
+    assert state.blueprint is not None
+    assert state.edited, "No edited chapters for Q&A generation."
+
+    mcp_conn: Optional[McpConnection] = getattr(state, "_mcp_conn", None)
+
+    async def generate_qa_one(brief: ChapterBrief) -> Optional[ChapterQA]:
+        edited_ch = state.edited.get(brief.chapter_number)
+        if not edited_ch:
+            return None
+
+        # Each Q&A agent gets its own MCP pool
+        agent_tools: Optional[List[Any]] = None
+        if mcp_conn and cfg:
+            agent_tools = await mcp_conn.get_pool_for_agent(cfg)
+        elif tools:
+            agent_tools = tools
+
+        agent = qa_generator_agent(
+            state.config, brief,
+            chapter_content=edited_ch.content_markdown,
+            tools=agent_tools or [],
+            config=cfg,
+        )
+        response = await tracer.traced_arun(
+            agent,
+            f"Generate Q&A pairs for chapter {brief.chapter_number}: {brief.title}",
+            phase=f"QAGen-Ch{brief.chapter_number}",
+            output_schema=ChapterQA,
+        )
+
+        if isinstance(response.content, ChapterQA):
+            return response.content
+
+        # Fallback: try to parse raw text
+        raw = str(response.content or "").strip()
+        if raw:
+            # Build a minimal ChapterQA from raw text if structured output failed
+            return ChapterQA(
+                chapter_number=brief.chapter_number,
+                chapter_title=brief.title,
+                qa_pairs=[QAPair(
+                    question="What is the core teaching of this chapter?",
+                    answer=raw[:500],
+                    source_reference="",
+                )],
+            )
+        return None
+
+    tasks = [generate_qa_one(brief) for brief in state.blueprint.chapters]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    qa_dir = ensure_dir(state.output_dir / "chapter_qa")
+    total_pairs = 0
+
+    for result in results:
+        if isinstance(result, Exception):
+            state.status["errors"].append(f"Q&A generation error: {result}")
+            continue
+        if result is None:
+            continue
+
+        state.chapter_qa[result.chapter_number] = result
+        total_pairs += len(result.qa_pairs)
+
+        # Append Q&A markdown to the edited chapter content
+        edited_ch = state.edited.get(result.chapter_number)
+        if edited_ch:
+            qa_md = _render_qa_markdown(result)
+            edited_ch.content_markdown = edited_ch.content_markdown.rstrip() + "\n\n" + qa_md
+            edited_ch.final_word_count = count_words(edited_ch.content_markdown)
+
+        write_json(
+            qa_dir / f"ch_{result.chapter_number:02d}_qa.json",
+            result.model_dump(),
+        )
+
+    print(f"  Q&A generation complete: {len(state.chapter_qa)} chapters, {total_pairs} total pairs")
+    state.save_snapshot()
+
+
+def _render_qa_markdown(chapter_qa: ChapterQA) -> str:
+    """Render a ChapterQA as a markdown section appended to the chapter."""
+    lines = [
+        "---",
+        "",
+        "## Questions and Answers",
+        "",
+    ]
+    for i, pair in enumerate(chapter_qa.qa_pairs, 1):
+        lines.append(f"**Q{i}: {pair.question}**")
+        lines.append("")
+        lines.append(pair.answer)
+        if pair.source_reference:
+            lines.append(f"")
+            lines.append(f"*— {pair.source_reference}*")
+        lines.append("")
+    return "\n".join(lines)
+
+
+# ── Phase 5.6: Frontmatter (Foreword + Benediction) ──────────────────────
+
+async def run_frontmatter(
+    state: PipelineState,
+    app_config: Optional[AppConfig] = None,
+) -> None:
+    """Generate foreword and benediction in parallel after QA is complete."""
+    cfg = app_config or load_config()
+    tracer = state.tracer
+
+    needs_foreword = state.config.include_foreword
+    needs_benediction = state.config.include_benediction
+
+    if not needs_foreword and not needs_benediction:
+        return
+
+    print("\n  Phase 5.6: Frontmatter (Foreword + Benediction)")
+    print("  " + "-" * 50)
+    state.status["phase"] = "frontmatter"
+
+    assert state.blueprint is not None
+
+    # Extract the last chapter's closing bridge to give the benediction a natural lead-in
+    last_chapter_bridge = ""
+    if state.edited:
+        last_ch_num = max(state.edited.keys())
+        last_content = state.edited[last_ch_num].content_markdown
+        bridge_match = re.search(
+            r"###\s*Closing Bridge\s*(.*?)(?=###|\Z)", last_content, re.DOTALL | re.IGNORECASE
+        )
+        if bridge_match:
+            last_chapter_bridge = bridge_match.group(1).strip()[:500]
+
+    tasks = []
+    task_labels = []
+
+    if needs_foreword:
+        fw_ag = foreword_agent(state.config, state.blueprint, cfg)
+        tasks.append(tracer.traced_arun(
+            fw_ag,
+            f"Write the foreword for '{state.config.title}'.",
+            phase="Frontmatter-Foreword",
+        ))
+        task_labels.append("foreword")
+
+    if needs_benediction:
+        bene_ag = benediction_agent(state.config, state.blueprint, last_chapter_bridge, cfg)
+        tasks.append(tracer.traced_arun(
+            bene_ag,
+            f"Write the closing benediction for '{state.config.title}'.",
+            phase="Frontmatter-Benediction",
+        ))
+        task_labels.append("benediction")
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    foreword_text = ""
+    benediction_text = ""
+
+    for label, result in zip(task_labels, results):
+        if isinstance(result, Exception):
+            state.status["errors"].append(f"Frontmatter {label} failed: {result}")
+            print(f"  WARNING: {label} generation failed — will be omitted from output")
+            continue
+        text = str(result.content or "").strip()
+        wc = count_words(text)
+        if label == "foreword":
+            foreword_text = text
+            print(f"  Foreword: {wc} words")
+            write_text(state.output_dir / "foreword.md", text)
+        else:
+            benediction_text = text
+            print(f"  Benediction: {wc} words")
+            write_text(state.output_dir / "benediction.md", text)
+
+    # Attach to state so run_designer can pick them up
+    state._foreword = foreword_text
+    state._benediction = benediction_text
 
 
 # ── Phase 6: Design (.docx) ───────────────────────────────────────────────
@@ -824,9 +1243,10 @@ async def run_designer(
         subtitle=state.config.subtitle,
         author=state.config.author,
         synopsis=state.config.synopsis,
-        foreword="",
-        benediction="",
+        foreword=getattr(state, "_foreword", ""),
+        benediction=getattr(state, "_benediction", ""),
         source_notes=[s for s in state.config.reference_sources] if state.config.reference_sources else [],
+        all_source_links=state.all_source_links,
         chapter_count=len(chapters_sorted),
         estimated_word_count=total_words,
     )
@@ -926,7 +1346,46 @@ def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path
         doc.add_paragraph(state.metadata.foreword)
         doc.add_page_break()
 
+    # Build a map of section_group → first chapter_number so we know when to insert dividers
+    cfg = load_config()
+    section_dividers_enabled = cfg.workflow.include_section_dividers
+    seen_groups: set = set()
+    # Map chapter_number → section_group from blueprint
+    chapter_groups: Dict[int, str] = {}
+    group_descriptions: Dict[str, str] = {}
+    if state.blueprint:
+        for ch in state.blueprint.chapters:
+            chapter_groups[ch.chapter_number] = ch.section_group or ""
+        for sec in (state.blueprint.sections or []):
+            group_descriptions[sec.label] = sec.description
+
     for ch in chapters:
+        grp = chapter_groups.get(ch.chapter_number, "")
+
+        # Insert section divider page when a new named group starts
+        if section_dividers_enabled and grp and grp not in seen_groups:
+            seen_groups.add(grp)
+            # Full-page section divider: centered label + description
+            sec_para = doc.add_paragraph()
+            sec_para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            # Add several blank lines to push text to vertical center
+            sec_para.add_run("\n" * 8)
+            sec_run = sec_para.add_run(grp)
+            sec_run.font.name = "Georgia"
+            sec_run.font.size = Pt(28)
+            sec_run.bold = True
+            sec_run.font.color.rgb = RGBColor(0x1A, 0x1A, 0x2E)
+            desc = group_descriptions.get(grp, "")
+            if desc:
+                desc_para = doc.add_paragraph()
+                desc_para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                desc_run = desc_para.add_run(desc)
+                desc_run.font.name = "Palatino Linotype"
+                desc_run.font.size = Pt(12)
+                desc_run.italic = True
+                desc_run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
+            doc.add_page_break()
+
         doc.add_heading(f"Chapter {ch.chapter_number}: {ch.title}", level=1)
         _markdown_to_docx(doc, ch.content_markdown)
         doc.add_page_break()
@@ -934,6 +1393,28 @@ def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path
     if config.include_benediction and state.metadata and state.metadata.benediction:
         doc.add_heading("Benediction", level=1)
         doc.add_paragraph(state.metadata.benediction)
+
+    # Source links appendix
+    if state.metadata and state.metadata.all_source_links:
+        doc.add_page_break()
+        doc.add_heading("Sources", level=1)
+        doc.add_paragraph(
+            "The following satsangs and teachings were referenced during the creation of this book.",
+            style="Normal",
+        )
+        current_ch = None
+        for lnk in sorted(state.metadata.all_source_links, key=lambda x: x.chapter_number):
+            if lnk.chapter_number != current_ch:
+                current_ch = lnk.chapter_number
+                ch_title = next(
+                    (c.title for c in chapters if c.chapter_number == current_ch), f"Chapter {current_ch}"
+                )
+                doc.add_heading(f"Chapter {current_ch}: {ch_title}", level=2)
+            entry = f"{lnk.title}"
+            if lnk.date:
+                entry += f" — {lnk.date}"
+            entry += f"\n{lnk.url}"
+            doc.add_paragraph(entry, style="Normal")
 
     doc.save(str(output_path))
 
@@ -995,9 +1476,19 @@ def _build_combined_markdown(state: PipelineState, chapters: List[EditedChapter]
         parts.append(f"### {config.subtitle}")
     parts.append(f"\n*{config.author}*\n")
 
+    # TOC with section groupings
     if config.include_toc:
         parts.append("---\n\n## Table of Contents\n")
+        seen_groups: set = set()
+        chapter_groups: Dict[int, str] = {}
+        if state.blueprint:
+            for ch in state.blueprint.chapters:
+                chapter_groups[ch.chapter_number] = ch.section_group or ""
         for ch in chapters:
+            grp = chapter_groups.get(ch.chapter_number, "")
+            if grp and grp not in seen_groups:
+                seen_groups.add(grp)
+                parts.append(f"\n**{grp}**\n")
             anchor = f"chapter-{ch.chapter_number}-{slugify(ch.title).lower()}"
             parts.append(f"- [Chapter {ch.chapter_number}: {ch.title}](#{anchor})")
         parts.append("")
@@ -1006,14 +1497,41 @@ def _build_combined_markdown(state: PipelineState, chapters: List[EditedChapter]
         parts.append("---\n\n## Foreword\n")
         parts.append(state.metadata.foreword)
 
+    # Chapters with section dividers
+    seen_groups_md: set = set()
+    chapter_groups_md: Dict[int, str] = {}
+    if state.blueprint:
+        for ch in state.blueprint.chapters:
+            chapter_groups_md[ch.chapter_number] = ch.section_group or ""
+
     parts.append("\n---\n")
     for ch in chapters:
+        grp = chapter_groups_md.get(ch.chapter_number, "")
+        if grp and grp not in seen_groups_md:
+            seen_groups_md.add(grp)
+            parts.append(f"\n---\n\n# {grp}\n\n---\n")
         parts.append(ch.content_markdown.strip())
         parts.append("\n---\n")
 
     if config.include_benediction and state.metadata and state.metadata.benediction:
         parts.append("## Benediction\n")
         parts.append(state.metadata.benediction)
+
+    # Sources appendix
+    if state.metadata and state.metadata.all_source_links:
+        parts.append("\n---\n\n## Sources\n")
+        parts.append("The following satsangs and teachings were referenced in this book.\n")
+        current_ch = None
+        for lnk in sorted(state.metadata.all_source_links, key=lambda x: x.chapter_number):
+            if lnk.chapter_number != current_ch:
+                current_ch = lnk.chapter_number
+                ch_title = next(
+                    (c.title for c in chapters if c.chapter_number == current_ch),
+                    f"Chapter {current_ch}",
+                )
+                parts.append(f"\n### Chapter {current_ch}: {ch_title}\n")
+            date_str = f" — {lnk.date}" if lnk.date else ""
+            parts.append(f"- **{lnk.title}**{date_str}  \n  {lnk.url}")
 
     write_text(output_path, "\n".join(parts))
 
@@ -1088,6 +1606,9 @@ async def run_pipeline(
         # ── Phase 3: Research (parallel) ───────────────────────────────
         await run_research(state, tools=tools, app_config=app_config)
 
+        # ── Phase 3.5: YouTube Video Matching ──────────────────────────
+        await run_youtube_matching(state, app_config=app_config)
+
         # ── Phase 4: Writing (batched) ─────────────────────────────────
         await run_writing(state, app_config=app_config)
 
@@ -1096,6 +1617,12 @@ async def run_pipeline(
 
         # ── Phase 5.5: QA Review (with rewrite loop) ─────────────────
         await run_qa_review(state, tools=tools, app_config=app_config)
+
+        # ── Phase 5.55: Q&A Generation (parallel per chapter) ─────────
+        await run_qa_generation(state, tools=tools, app_config=app_config)
+
+        # ── Phase 5.6: Frontmatter (Foreword + Benediction) ───────────
+        await run_frontmatter(state, app_config=app_config)
 
         # ── Phase 6: Designer (.docx) ──────────────────────────────────
         await run_designer(state, app_config=app_config)

@@ -90,7 +90,9 @@ def architect_agent(
     wf = cfg.workflow
 
     instructions = [
-        "You are a book architect. Design a detailed chapter-by-chapter blueprint.",
+        "You are a book architect for a published spiritual book.",
+        "Design a detailed, properly structured blueprint — not a list of flat chapters,",
+        "but a real book with named sections, a preface, introduction, and conclusion.",
         "",
         SWAMIJI_VOICE,
         "",
@@ -104,23 +106,70 @@ def architect_agent(
         f"Themes: {', '.join(book_config.themes)}",
         f"Target audience: {book_config.target_audience}",
         "",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "BOOK STRUCTURE — assign chapter_type and section_group to every chapter:",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "",
+        f"Chapter 1    → chapter_type: 'preface'       target_word_count: {cfg.workflow.preface_words}",
+        "               Title: evocative, e.g. 'Before You Begin' or 'A Note to the Reader'",
+        "               No opening story, no exercise — Swamiji speaks directly to the reader.",
+        "               section_group: '' (no section divider for preface)",
+        "",
+        "Chapter 2    → chapter_type: 'introduction'",
+        "               Full chapter — sets the book's central question, why it matters now.",
+        "               section_group: '' (no section divider)",
+        "",
+        "Chapters 3-4 → chapter_type: 'preliminary'",
+        "               section_group: 'Part I: [evocative name]'",
+        "               Foundational concepts — clears confusion, builds the vocabulary.",
+        "",
+        "Chapters 5 to N-1 → chapter_type: 'main'",
+        "               section_group: 'Part II: [evocative name]' (or split into Part II + Part III)",
+        "               Core teachings — the deep dives.",
+        "",
+        f"Chapter N    → chapter_type: 'conclusion'    target_word_count: {cfg.workflow.conclusion_words}",
+        "               section_group: 'Part III: [evocative name]' or standalone",
+        "               Synthesis — sends the reader back into life transformed.",
+        "",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "CHAPTER TITLE STYLE — titles must read like a published spiritual book:",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "  - 4-8 words, evocative not descriptive",
+        "  - First word often a noun or 'The'",
+        "  - DO NOT: 'Understanding Consciousness', 'The Nature of Awareness'",
+        "  - DO: 'The Fire That Does Not Burn', 'Before the First Thought',",
+        "         'The Mirror Has No Dust', 'Living on the Edge of Forever'",
+        "  - Models: Eckhart Tolle, Ramana Maharshi, Living Enlightenment chapter titles",
+        "",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "SECTION GROUP LABELS — name each Part like a book subtitle:",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "  - Format: 'Part I: The Ground of Being'",
+        "  - The subtitle after the colon must be evocative, not a topic label",
+        "  - Examples: 'Part I: Clearing the Smoke', 'Part II: The Awakening Fire',",
+        "              'Part III: Living the Truth'",
+        "",
         "Section template for each chapter: " + " -> ".join(book_config.section_template),
         "",
         "For EACH chapter brief you MUST provide:",
-        "  - title: a compelling chapter title",
+        "  - title: compelling, published-book style (see title style guide above)",
+        "  - chapter_type: one of 'preface' | 'introduction' | 'preliminary' | 'main' | 'conclusion'",
+        "  - section_group: the Part label (e.g. 'Part I: The Ground of Being') or '' for preface/intro",
         "  - synopsis: 2-3 sentences on what this chapter covers",
         "  - story_seed: AT LEAST 3 sentences — protagonist, setting, conflict, turning point",
+        "    (For preface: 'none' — preface has no story)",
         "  - narrative_arc: 3-5 sentences tracing the insight progression",
         "  - teaching_points: list of key points this chapter teaches",
         "  - verse_references: exact shastra references — include the original Sanskrit verse/shloka/sutra",
         "    along with its source (e.g. 'Bhagavad Gita 2.47', 'Patanjali Yoga Sutra 1.2', 'Vivekachudamani 20').",
-        "    The Writer will translate these and weave them into the teaching.",
         "  - humor_seed: 2-3 sentence warm anecdote scenario (NOT a punchline)",
         "  - bridge_to_next: 2-3 sentences forming a narrative hook into the next chapter",
-        f"  - target_word_count: default {book_config.words_per_chapter}, adjust for pivotal chapters",
+        f"  - target_word_count: default {book_config.words_per_chapter}; preface={cfg.workflow.preface_words}; conclusion={cfg.workflow.conclusion_words}",
         "",
         "Also provide:",
-        "  - thematic_arc: how the reader transforms from chapter 1 to the last",
+        "  - sections: list of BookSectionGroup objects — one per Part (not for preface/intro)",
+        "    Each has: label (e.g. 'Part I: The Ground of Being'), chapter_numbers, description",
+        "  - thematic_arc: how the reader transforms from preface to conclusion",
         "  - recurring_motifs: images/phrases that repeat for cohesion",
         "  - voice_notes: guidance for the Writer on tone and speech patterns",
     ]
@@ -184,7 +233,18 @@ def researcher_agent(
             "Strategy: call search_chapters(query='<topic>') on SPH, limit to 3 calls total.",
             "",
             "For each quote, include: Sanskrit text, exact source, English translation.",
-            "Output a ResearchPacket. Do NOT write prose.",
+            "",
+            "SOURCE LINK EXTRACTION — IMPORTANT:",
+            "  Transcripts from MCP tools often contain YouTube URLs (youtube.com/watch or youtu.be).",
+            "  Whenever a tool response contains a YouTube link, extract it into source_links.",
+            "  For each link capture:",
+            "    - title: the satsang/video title from the transcript metadata",
+            "    - url: the full YouTube URL",
+            "    - date: the date of the satsang if present (e.g. '14 Mar 2019')",
+            f"    - chapter_number: {chapter_brief.chapter_number}",
+            "  If no YouTube links appear in the tool responses, leave source_links empty.",
+            "",
+            "Output a ResearchPacket including source_links. Do NOT write prose.",
         ],
         tools=tools or [],
         markdown=False,
@@ -280,18 +340,59 @@ def content_writer_agent(
     )
 
 
+# Story format labels — cycled deterministically in run_writing
+STORY_FORMAT_LABELS = {
+    "A": "SHORT PARABLE/JOKE",
+    "B": "SWAMIJI'S OWN EXPERIENCE",
+    "C": "DEVOTEE/SEEKER ENCOUNTER",
+    "D": "REAL-LIFE INCIDENT",
+}
+STORY_FORMAT_CYCLE = ["A", "B", "C", "D"]
+
+
 def story_writer_agent(
     book_config: BookConfig,
     blueprint: BookBlueprint,
     chapter_brief: ChapterBrief,
     research: Optional[ResearchPacket] = None,
     prior_summaries: Optional[List[str]] = None,
+    assigned_format: Optional[str] = None,
+    formats_used: Optional[List[str]] = None,
     config: Optional[AppConfig] = None,
 ) -> Agent:
-    """Writes the opening story in Living Enlightenment style."""
+    """Writes the opening story in Living Enlightenment style.
+
+    Args:
+        assigned_format: One of 'A', 'B', 'C', 'D' — pre-assigned by the orchestrator
+                         to ensure variety across chapters. When provided, the agent
+                         MUST use this format.
+        formats_used: List of format letters already used in prior chapters,
+                      shown to the agent for awareness.
+    """
     cfg = config or _cfg()
-    wf = cfg.workflow
     prior_context = _build_prior_context(prior_summaries)
+
+    # Build the format assignment block
+    if assigned_format and assigned_format in STORY_FORMAT_LABELS:
+        format_label = STORY_FORMAT_LABELS[assigned_format]
+        used_str = (
+            f"  Formats used in prior chapters: {', '.join(f'Format {f}' for f in formats_used)}"
+            if formats_used
+            else "  This is the first chapter."
+        )
+        format_directive = [
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"ASSIGNED STORY FORMAT FOR THIS CHAPTER: FORMAT {assigned_format} — {format_label}",
+            "You MUST use this format. Do not substitute a different one.",
+            used_str,
+            "This assignment ensures the book has varied story styles across chapters.",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        ]
+    else:
+        format_directive = [
+            "Pick the ONE format that best fits this chapter's theme.",
+            "Vary the format — do NOT default to Format B every time.",
+        ]
 
     return Agent(
         name=f"StoryWriter (Ch.{chapter_brief.chapter_number})",
@@ -306,8 +407,7 @@ def story_writer_agent(
             "",
             "STORY CRAFT — Modeled on Living Enlightenment by Paramahamsa Nithyananda.",
             "",
-            "In Living Enlightenment, Swamiji uses MULTIPLE story formats.",
-            "Pick the ONE format that best fits this chapter's theme:",
+            *format_directive,
             "",
             "FORMAT A — SHORT PARABLE/JOKE (2-3 paragraphs, in italics):",
             "  A compact story with a twist or punchline that pivots into the teaching.",
@@ -342,9 +442,7 @@ def story_writer_agent(
             "  run across the road and just jumps onto the road without a thought about her",
             "  own safety...'",
             "",
-            "CRUCIAL RULES:",
-            "  - Do NOT always use Format B. Vary across chapters. If prior chapters used",
-            "    ashram stories, use a parable or devotee encounter this time.",
+            "RULES (apply regardless of format):",
             "  - The story must END at a moment of insight — a pause, a shift, a surprise.",
             "    Do NOT explain the teaching in the story. The teaching section does that.",
             "  - After the story, add ONE bridge sentence that hands off to the teaching:",
@@ -419,6 +517,105 @@ def combiner_writer_agent(
             "",
             prior_context,
             "Output the COMPLETE chapter markdown. No commentary or preamble.",
+        ],
+        tools=[],
+        markdown=False,
+    )
+
+
+# ── 8. Foreword Agent ─────────────────────────────────────────────────────
+
+def foreword_agent(
+    book_config: BookConfig,
+    blueprint: BookBlueprint,
+    config: Optional[AppConfig] = None,
+) -> Agent:
+    """Writes the book's foreword in Swamiji's voice."""
+    chapter_list = "\n".join(
+        f"  Chapter {ch.chapter_number}: {ch.title} — {ch.synopsis}"
+        for ch in blueprint.chapters
+    )
+
+    return Agent(
+        name="Foreword Writer",
+        role="Write the book's foreword as Swamiji welcoming the reader.",
+        model=build_agent_model("foreword", config),
+        instructions=[
+            f"Write the Foreword for '{book_config.title}'.",
+            "",
+            SWAMIJI_VOICE,
+            "",
+            "The Foreword is Swamiji's direct invitation to the reader before they enter the book.",
+            "It is 400–600 words. Write in first person as Swamiji.",
+            "",
+            "Structure (do NOT use headings — write as continuous flowing prose):",
+            "  1. Open with a living moment — a question Swamiji has heard ten thousand times,",
+            "     or a scene that captures the exact hunger the reader is feeling right now.",
+            "  2. Why this book exists — the spiritual necessity of this teaching in this moment.",
+            "  3. What the reader will encounter — weave in 2-3 chapter themes organically,",
+            "     not as a table of contents but as a promise.",
+            "  4. A blessing or invocation — calling Paramashiva's grace onto the reader.",
+            "  5. Close with Swamiji's signature tone: fierce, compassionate, certain.",
+            "",
+            f"Book title: {book_config.title}",
+            f"Thematic arc: {blueprint.thematic_arc}",
+            f"Themes: {', '.join(book_config.themes)}",
+            "",
+            "Chapters in this book:",
+            chapter_list,
+            "",
+            "Output ONLY the foreword prose. No 'Foreword:' heading, no commentary.",
+        ],
+        tools=[],
+        markdown=False,
+    )
+
+
+# ── 9. Benediction Agent ───────────────────────────────────────────────────
+
+def benediction_agent(
+    book_config: BookConfig,
+    blueprint: BookBlueprint,
+    last_chapter_bridge: str = "",
+    config: Optional[AppConfig] = None,
+) -> Agent:
+    """Writes the closing benediction in Swamiji's voice."""
+    bridge_context = (
+        [
+            "",
+            "The last chapter closes with this bridge — begin naturally from here:",
+            last_chapter_bridge,
+        ]
+        if last_chapter_bridge
+        else []
+    )
+
+    return Agent(
+        name="Benediction Writer",
+        role="Write the book's closing benediction as Swamiji's final transmission.",
+        model=build_agent_model("benediction", config),
+        instructions=[
+            f"Write the closing Benediction for '{book_config.title}'.",
+            "",
+            SWAMIJI_VOICE,
+            "",
+            "The Benediction is Swamiji's final transmission after the reader completes the book.",
+            "It is 300–400 words. Write in first person as Swamiji.",
+            "",
+            "Structure (do NOT use headings — write as continuous flowing prose):",
+            "  1. Acknowledge the inner journey the reader has just completed.",
+            "  2. Declare the transformation now alive in them — not as hope, but as cosmic certainty.",
+            "  3. One final crystallizing insight that distills the whole book in 3-4 sentences.",
+            "  4. A Sanskrit mantra or shloka with its source and English translation —",
+            "     Swamiji's final living gift to the reader.",
+            "  5. A closing blessing line — e.g. 'You are Paramashiva. Live it.'",
+            "",
+            f"Book title: {book_config.title}",
+            f"Thematic arc: {blueprint.thematic_arc}",
+            f"Themes: {', '.join(book_config.themes)}",
+            *bridge_context,
+            "",
+            "Output ONLY the benediction prose. No 'Benediction:' heading, no commentary.",
         ],
         tools=[],
         markdown=False,
@@ -614,6 +811,131 @@ def qa_agent(
             "  - Check for thematic progression — does the book build toward a crescendo?",
             "",
             "Output a BookQAReview with overall_approved, per-chapter results, and book_level_notes.",
+        ],
+        tools=tools or [],
+        markdown=False,
+        tool_call_limit=3,
+    )
+
+
+# ── 6b. Targeted QA Agent (post-rewrite check) ────────────────────────────
+
+def targeted_qa_agent(
+    book_config: BookConfig,
+    rewritten_chapters_markdown: str,
+    full_book_context: str,
+    revision_notes_by_chapter: dict,
+    tools: Optional[List[Any]] = None,
+    config: Optional[AppConfig] = None,
+) -> Agent:
+    """
+    Targeted QA that re-checks ONLY rewritten chapters after a rewrite cycle.
+    Chapters that already passed are not re-evaluated (locked in).
+    """
+    notes_block = "\n".join(
+        f"  Ch {num}: {notes}"
+        for num, notes in revision_notes_by_chapter.items()
+    )
+
+    return Agent(
+        name="Targeted QA (Post-Rewrite)",
+        role="Re-check only the rewritten chapters to confirm issues are resolved.",
+        model=build_agent_model("qa", config),
+        instructions=[
+            "You are doing a TARGETED QA check after a rewrite cycle.",
+            "Only the chapters listed below were rewritten — score ONLY these.",
+            "Other chapters already passed QA and are locked in. Do not re-score them.",
+            "",
+            "REFERENCE STANDARD — Living Enlightenment by Paramahamsa Nithyananda:",
+            "  - First person Guruvaak, vivid stories, exact Sanskrit shlokas with source + translation",
+            "  - Tone is fierce yet compassionate, never dry or academic",
+            "  - Each chapter: story → teaching → practice → humor → bridge",
+            "",
+            "ORIGINAL QA ISSUES THAT TRIGGERED THE REWRITE:",
+            notes_block,
+            "",
+            "REWRITTEN CHAPTERS TO RE-SCORE:",
+            rewritten_chapters_markdown,
+            "",
+            "FULL BOOK CONTEXT (for continuity checks — do not re-score these):",
+            full_book_context[:3000] + "..." if len(full_book_context) > 3000 else full_book_context,
+            "",
+            "SCORING CRITERIA (same as first pass):",
+            "  voice_score (1-10), structure_score (1-10), shastra_score (1-10), story_score (1-10)",
+            "  PASS if ALL scores >= 6. FAIL if ANY score < 6.",
+            "",
+            "IMPORTANT: Only return ChapterQAResult entries for the rewritten chapters.",
+            "Set overall_approved=True only if ALL rewritten chapters now pass.",
+            "Output a BookQAReview with only the rewritten chapters in the chapters list.",
+        ],
+        tools=tools or [],
+        markdown=False,
+        tool_call_limit=2,
+    )
+
+
+# ── 6c. Q&A Generator Agent ───────────────────────────────────────────────
+
+def qa_generator_agent(
+    book_config: BookConfig,
+    chapter_brief: ChapterBrief,
+    chapter_content: str,
+    tools: Optional[List[Any]] = None,
+    config: Optional[AppConfig] = None,
+) -> Agent:
+    """
+    Generates 8-12 Q&A pairs for the end of a chapter.
+    Questions are in a seeker's voice; answers are in Swamiji's voice.
+    Uses MCP to draw from related transcripts beyond the source chapter.
+    """
+    cfg = config or _cfg()
+    target_pairs = cfg.workflow.qa_pairs_per_chapter
+
+    return Agent(
+        name=f"QA Generator (Ch.{chapter_brief.chapter_number})",
+        role=f"Generate Q&A pairs for chapter {chapter_brief.chapter_number}: {chapter_brief.title}",
+        model=build_agent_model("qa_generator", config),
+        instructions=[
+            f"Generate exactly {target_pairs} Q&A pairs for chapter {chapter_brief.chapter_number}: '{chapter_brief.title}'.",
+            "",
+            SWAMIJI_VOICE,
+            "",
+            "WHAT YOU ARE CREATING:",
+            "  A 'Questions and Answers' section that appears at the end of this chapter.",
+            "  Readers who finish this chapter will have questions. Answer them as Swamiji.",
+            "",
+            "QUESTION VOICE — write as a genuine seeker:",
+            "  - Real questions a sincere spiritual seeker would ask after reading this chapter",
+            "  - Mix of: practical ('How do I actually do this?'), philosophical ('But what about...?'),",
+            "    personal ('I feel like this doesn't apply to me because...'), and clarifying questions",
+            "  - Questions should feel human, not textbook",
+            "  - 1-2 sentences per question",
+            "",
+            "ANSWER VOICE — write as Swamiji:",
+            "  - First person Guruvaak — direct, alive, not academic",
+            "  - 100-200 words per answer",
+            "  - Use Sanskrit naturally: 'your chitta, your inner space' not just 'your mind'",
+            "  - Often starts with 'Understand...' or 'Listen...' or 'Beautiful question.'",
+            "  - Can include a micro-story or analogy",
+            "  - Ends decisively — no hedging",
+            "",
+            "SOURCE INSTRUCTIONS:",
+            "  - Use MCP to search for 2-3 related transcripts on this chapter's topics",
+            "  - Answers should draw from Swamiji's broader teachings, not just this chapter",
+            "  - Call search_chapters on SPH with the chapter's main topic (max 3 tool calls)",
+            "  - If a source transcript contains a YouTube URL, include it in source_reference",
+            "",
+            "TOOL NAME RULES:",
+            "  UNDERSCORES for SPH: search_chapters  get_chapter  list_books",
+            "  HYPHENS for Jnanalaya: search-books  read-chapter  get-chapters",
+            "",
+            f"Chapter topics: {', '.join(chapter_brief.teaching_points)}",
+            "",
+            "Chapter content (what was just taught):",
+            chapter_content[:2000] + "..." if len(chapter_content) > 2000 else chapter_content,
+            "",
+            f"Output a ChapterQA with exactly {target_pairs} QAPair entries.",
+            "Do NOT write any prose outside the structured output.",
         ],
         tools=tools or [],
         markdown=False,

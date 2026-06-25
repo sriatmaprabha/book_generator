@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
+from dotenv import load_dotenv
+
+# Load .env from the project root (book_generator/) or v2/ — whichever exists first
+load_dotenv(Path(__file__).parent / ".env")
+load_dotenv(Path(__file__).parent.parent / ".env")
 from pydantic import BaseModel, Field
 
 
@@ -40,6 +45,19 @@ class WorkflowSettings(BaseModel):
     writer_batch_size: int = 3
     parallel_research: bool = True
     parallel_editing: bool = True
+    # Book structure
+    include_section_dividers: bool = True
+    preface_words: int = 500
+    conclusion_words: int = 1500
+    # Q&A
+    include_chapter_qa: bool = True
+    qa_pairs_per_chapter: int = 10
+    # YouTube source matching
+    youtube_channel_handle: str = "SriNithyananda"
+    youtube_channel_url: str = "https://www.youtube.com/@SriNithyananda"
+    youtube_api_key: str = ""
+    youtube_videos_per_chapter: int = 3
+    youtube_enabled: bool = True
 
 
 class AppConfig(BaseModel):

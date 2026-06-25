@@ -9,7 +9,7 @@
 defaults:
   model: "openai/gpt-oss-120b"
   base_url: "https://integrate.api.nvidia.com/v1"
-  api_key: "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"
+  api_key: "${NVIDIA_API_KEY}"
   max_tokens: 8192
 
 # --- Per-agent overrides ----------------------------------------------------
@@ -52,6 +52,21 @@ agents:
     model: "openai/gpt-oss-120b"
     max_tokens: 4096
 
+  foreword:
+    # Short creative piece — 400-600 words
+    model: "openai/gpt-oss-120b"
+    max_tokens: 2048
+
+  benediction:
+    # Short closing blessing — 300-400 words
+    model: "openai/gpt-oss-120b"
+    max_tokens: 2048
+
+  qa_generator:
+    # Generates 8-12 Q&A pairs per chapter — needs MCP access + enough tokens
+    model: "openai/gpt-oss-120b"
+    max_tokens: 8192
+
 # --- MCP Sources ------------------------------------------------------------
 mcp_sources:
   - name: "Kailasa Jnanalaya"
@@ -71,3 +86,19 @@ workflow:
   writer_batch_size: 3          # chapters written before summarizing for next batch
   parallel_research: true       # research all chapters concurrently
   parallel_editing: true        # edit all chapters concurrently
+
+  # Book structure
+  include_section_dividers: true  # render Part I / Part II divider pages in .docx
+  preface_words: 500              # target word count for preface chapter
+  conclusion_words: 1500          # target word count for conclusion chapter
+
+  # Q&A
+  include_chapter_qa: true        # generate Q&A section after each chapter
+  qa_pairs_per_chapter: 10        # target number of Q&A pairs per chapter
+
+  # YouTube source matching
+  youtube_channel_handle: "SriNithyananda"
+  youtube_channel_url: "https://www.youtube.com/@SriNithyananda"
+  youtube_api_key: "${YOUTUBE_API_KEY}"
+  youtube_videos_per_chapter: 3   # top N matched videos per chapter
+  youtube_enabled: true           # set false to skip Phase 3.5 without removing code
