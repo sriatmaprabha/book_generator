@@ -1135,6 +1135,40 @@ def _render_qa_markdown(chapter_qa: ChapterQA) -> str:
     return "\n".join(lines)
 
 
+# ── Phase 5.7: Inject YouTube links into chapters ────────────────────────
+
+def inject_youtube_links(state: "PipelineState") -> None:
+    """Append a 'Watch & Learn' section to each chapter that has YouTube matches."""
+    if not state.all_source_links or not state.edited:
+        return
+
+    by_chapter: Dict[int, List] = {}
+    for lnk in state.all_source_links:
+        by_chapter.setdefault(lnk.chapter_number, []).append(lnk)
+
+    injected = 0
+    for ch_num, links in sorted(by_chapter.items()):
+        chapter = state.edited.get(ch_num)
+        if not chapter:
+            continue
+        lines = [
+            "",
+            "---",
+            "",
+            "## Watch & Learn",
+            "",
+            "Related teachings from The SPH Bhagwan Sri Nithyananda Paramashivam:",
+            "",
+        ]
+        for lnk in links:
+            lines.append(f"- [{lnk.title}]({lnk.url})")
+        chapter.content_markdown = chapter.content_markdown.rstrip() + "\n" + "\n".join(lines)
+        injected += 1
+
+    if injected:
+        print(f"\n  YouTube links injected into {injected} chapter(s)")
+
+
 # ── Phase 5.6: Frontmatter (Foreword + Benediction) ──────────────────────
 
 async def run_frontmatter(
@@ -1623,6 +1657,9 @@ async def run_pipeline(
 
         # ── Phase 5.6: Frontmatter (Foreword + Benediction) ───────────
         await run_frontmatter(state, app_config=app_config)
+
+        # ── Phase 5.7: Inject YouTube links into chapter footers ───────
+        inject_youtube_links(state)
 
         # ── Phase 6: Designer (.docx) ──────────────────────────────────
         await run_designer(state, app_config=app_config)
