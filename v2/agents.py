@@ -537,25 +537,26 @@ def foreword_agent(
     )
 
     return Agent(
-        name="Foreword Writer",
-        role="Write the book's foreword as Swamiji welcoming the reader.",
+        name="Compiler's Note Writer",
+        role="Write the Compiler's Note on behalf of the compilation team, offering this book at Swamiji's lotus feet.",
         model=build_agent_model("foreword", config),
         instructions=[
-            f"Write the Foreword for '{book_config.title}'.",
+            f"Write the Compiler's Note for '{book_config.title}'.",
             "",
-            SWAMIJI_VOICE,
+            "A Compiler's Note is written by the team that compiled this book on behalf of",
+            "His Divine Holiness Bhagwan Sri Nithyananda Paramashivam.",
+            "It is NOT written in Swamiji's voice — it is written humbly by the compilers,",
+            "offering this work at His lotus feet.",
             "",
-            "The Foreword is Swamiji's direct invitation to the reader before they enter the book.",
-            "It is 400–600 words. Write in first person as Swamiji.",
+            "It is 300–500 words. Write in first person plural ('we', 'our team').",
             "",
             "Structure (do NOT use headings — write as continuous flowing prose):",
-            "  1. Open with a living moment — a question Swamiji has heard ten thousand times,",
-            "     or a scene that captures the exact hunger the reader is feeling right now.",
-            "  2. Why this book exists — the spiritual necessity of this teaching in this moment.",
-            "  3. What the reader will encounter — weave in 2-3 chapter themes organically,",
-            "     not as a table of contents but as a promise.",
-            "  4. A blessing or invocation — calling Paramashiva's grace onto the reader.",
-            "  5. Close with Swamiji's signature tone: fierce, compassionate, certain.",
+            "  1. Open with reverence — acknowledge the divine source of these teachings.",
+            "  2. How this book came to be — compiled from Swamiji's satsangs and discourses.",
+            "  3. What this book offers the reader — weave in 2-3 chapter themes organically.",
+            "  4. A note of humility — any errors in compilation are ours; the wisdom is His.",
+            "  5. Close with a dedication: 'Offered at the lotus feet of His Divine Holiness",
+            "     Bhagwan Sri Nithyananda Paramashivam.'",
             "",
             f"Book title: {book_config.title}",
             f"Thematic arc: {blueprint.thematic_arc}",
@@ -564,7 +565,7 @@ def foreword_agent(
             "Chapters in this book:",
             chapter_list,
             "",
-            "Output ONLY the foreword prose. No 'Foreword:' heading, no commentary.",
+            "Output ONLY the compiler's note prose. No heading, no commentary.",
         ],
         tools=[],
         markdown=False,
@@ -975,4 +976,92 @@ def designer_agent(config: Optional[AppConfig] = None) -> Agent:
         ],
         tools=[],
         markdown=False,
+    )
+
+
+# ── 10. Glossary Agent ─────────────────────────────────────────────────────
+
+def glossary_agent(
+    book_config: BookConfig,
+    all_chapter_text: str,
+    config: Optional[AppConfig] = None,
+) -> Agent:
+    """Extracts Sanskrit/spiritual terms and defines them for the glossary."""
+    return Agent(
+        name="Glossary Writer",
+        role="Extract Sanskrit and spiritual terms from the book and write concise definitions.",
+        model=build_agent_model("editor", config),
+        instructions=[
+            f"You are compiling a glossary for the book '{book_config.title}'.",
+            "",
+            "From the chapter content provided, identify ALL Sanskrit words, spiritual terms,",
+            "and KAILASA-specific concepts that a general reader would not know.",
+            "",
+            "For each term write a clear, one-to-two sentence definition grounded in",
+            "Sanatana Dharma and the teachings of His Divine Holiness",
+            "Bhagwan Sri Nithyananda Paramashivam.",
+            "",
+            "Rules:",
+            "  - Include only terms actually used in the book text.",
+            "  - Do NOT include common English words.",
+            "  - Do NOT add diacritical marks (no ā, ī, ṭ etc.) — plain ASCII only.",
+            "  - Definitions should be accessible to a Western reader.",
+            "  - Sort alphabetically.",
+            "",
+            "Output format — one term per line, exactly:",
+            "TERM: definition",
+            "",
+            "Example:",
+            "Advaita: The non-dual philosophy declaring that the individual self and",
+            "  Paramashiva (the ultimate reality) are one.",
+            "",
+            "Book chapters (combined text):",
+            all_chapter_text[:6000],
+        ],
+        tools=[],
+        markdown=False,
+    )
+
+
+# ── 11. Back Cover Agent ───────────────────────────────────────────────────
+
+def back_cover_agent(
+    book_config: BookConfig,
+    blueprint: "BookBlueprint",
+    config: Optional[AppConfig] = None,
+) -> Agent:
+    """Writes the back-cover blurb and SPH bio."""
+    return Agent(
+        name="Back Cover Writer",
+        role="Write the back cover text: a compelling blurb and a short SPH bio.",
+        model=build_agent_model("foreword", config),
+        instructions=[
+            f"Write the back cover text for '{book_config.title}'.",
+            "",
+            "It has two parts:",
+            "",
+            "**Part 1 — Book Blurb (150–200 words)**",
+            "A compelling description that makes the reader want to read the book.",
+            "Written in third person. Conveys the spiritual promise of the book.",
+            "End with a one-line hook in bold.",
+            "",
+            "**Part 2 — About The Author**",
+            "A short biography (100–150 words) of:",
+            "His Divine Holiness Bhagwan Sri Nithyananda Paramashivam",
+            "  — The reviver of KAILASA, the Ancient Enlightened Hindu Civilizational Nation.",
+            "  — Living Avatar, Incarnation of Paramashiva.",
+            "  — Author of over 500 books on Sanatana Dharma.",
+            "  — Founder of countless temples, universities, and humanitarian organisations.",
+            "  — Reviver of authentic Vedic sciences including Yoga, Ayurveda, and Jyotisha.",
+            "",
+            "End with:",
+            "Om Nithyananda Paramashivoham",
+            "",
+            f"Book title: {book_config.title}",
+            f"Thematic arc: {blueprint.thematic_arc}",
+            "",
+            "Output the two sections with headers '## Book Blurb' and '## About The Author'.",
+        ],
+        tools=[],
+        markdown=True,
     )

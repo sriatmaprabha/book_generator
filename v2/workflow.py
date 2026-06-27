@@ -46,12 +46,14 @@ from config import AppConfig, load_config
 from models import BookQAReview, ChapterQAResult, ContentDraft, StoryDraft
 from agents import (
     architect_agent,
+    back_cover_agent,
     benediction_agent,
     combiner_writer_agent,
     content_writer_agent,
     designer_agent,
     editor_agent,
     foreword_agent,
+    glossary_agent,
     intake_agent,
     qa_agent,
     qa_generator_agent,
@@ -1135,6 +1137,47 @@ def _render_qa_markdown(chapter_qa: ChapterQA) -> str:
     return "\n".join(lines)
 
 
+# ── Phase 5.65: Strip diacritics from all chapter content ────────────────
+
+_DIACRITIC_MAP = str.maketrans({
+    "ā": "a", "Ā": "A",
+    "ī": "i", "Ī": "I",
+    "ū": "u", "Ū": "U",
+    "ē": "e", "Ē": "E",
+    "ō": "o", "Ō": "O",
+    "ṭ": "t", "Ṭ": "T",
+    "ḍ": "d", "Ḍ": "D",
+    "ṇ": "n", "Ṇ": "N",
+    "ṅ": "n", "Ṅ": "N",
+    "ñ": "n", "Ñ": "N",
+    "ś": "s", "Ś": "S",
+    "ṣ": "s", "Ṣ": "S",
+    "ḥ": "h", "Ḥ": "H",
+    "ṁ": "m", "Ṁ": "M",
+    "ṃ": "m", "Ṃ": "M",
+    "ḷ": "l", "Ḷ": "L",
+    "ṛ": "r", "Ṛ": "R",
+    "ṝ": "r", "Ṝ": "R",
+})
+
+
+def strip_diacritics(state: "PipelineState") -> None:
+    """Remove Sanskrit diacritical marks from all chapter content."""
+    if not state.edited:
+        return
+    removed = 0
+    for ch in state.edited.values():
+        cleaned = ch.content_markdown.translate(_DIACRITIC_MAP)
+        if cleaned != ch.content_markdown:
+            removed += 1
+        ch.content_markdown = cleaned
+    if state._foreword:
+        state._foreword = state._foreword.translate(_DIACRITIC_MAP)
+    if state._benediction:
+        state._benediction = state._benediction.translate(_DIACRITIC_MAP)
+    print(f"\n  Diacritics stripped from {removed} chapter(s)")
+
+
 # ── Phase 5.7: Inject YouTube links into chapters ────────────────────────
 
 def inject_youtube_links(state: "PipelineState") -> None:
@@ -1209,7 +1252,7 @@ async def run_frontmatter(
         fw_ag = foreword_agent(state.config, state.blueprint, cfg)
         tasks.append(tracer.traced_arun(
             fw_ag,
-            f"Write the foreword for '{state.config.title}'.",
+            f"Write the compiler's note for '{state.config.title}'.",
             phase="Frontmatter-Foreword",
         ))
         task_labels.append("foreword")
@@ -1223,10 +1266,33 @@ async def run_frontmatter(
         ))
         task_labels.append("benediction")
 
+    # Glossary
+    all_chapter_text = "\n\n".join(
+        ch.content_markdown for ch in state.edited.values()
+    ) if state.edited else ""
+    gloss_ag = glossary_agent(state.config, all_chapter_text, cfg)
+    tasks.append(tracer.traced_arun(
+        gloss_ag,
+        "Extract Sanskrit terms and write glossary definitions.",
+        phase="Frontmatter-Glossary",
+    ))
+    task_labels.append("glossary")
+
+    # Back cover
+    bc_ag = back_cover_agent(state.config, state.blueprint, cfg)
+    tasks.append(tracer.traced_arun(
+        bc_ag,
+        f"Write the back cover text for '{state.config.title}'.",
+        phase="Frontmatter-BackCover",
+    ))
+    task_labels.append("back_cover")
+
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     foreword_text = ""
     benediction_text = ""
+    glossary: Dict[str, str] = {}
+    back_cover_text = ""
 
     for label, result in zip(task_labels, results):
         if isinstance(result, Exception):
@@ -1237,16 +1303,32 @@ async def run_frontmatter(
         wc = count_words(text)
         if label == "foreword":
             foreword_text = text
-            print(f"  Foreword: {wc} words")
+            print(f"  Compiler's Note: {wc} words")
             write_text(state.output_dir / "foreword.md", text)
-        else:
+        elif label == "benediction":
             benediction_text = text
             print(f"  Benediction: {wc} words")
             write_text(state.output_dir / "benediction.md", text)
+        elif label == "glossary":
+            for line in text.splitlines():
+                if ":" in line:
+                    term, _, defn = line.partition(":")
+                    term = term.strip()
+                    defn = defn.strip()
+                    if term and defn:
+                        glossary[term] = defn
+            print(f"  Glossary: {len(glossary)} terms")
+            write_text(state.output_dir / "glossary.md", text)
+        elif label == "back_cover":
+            back_cover_text = text
+            print(f"  Back cover: {wc} words")
+            write_text(state.output_dir / "back_cover.md", text)
 
     # Attach to state so run_designer can pick them up
     state._foreword = foreword_text
     state._benediction = benediction_text
+    state._glossary = glossary
+    state._back_cover = back_cover_text
 
 
 # ── Phase 6: Design (.docx) ───────────────────────────────────────────────
@@ -1305,6 +1387,8 @@ def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path
         from docx.shared import Pt, RGBColor, Inches
         from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
         from docx.enum.style import WD_STYLE_TYPE
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
     except ImportError:
         print("  WARNING: python-docx not installed. Skipping .docx generation.")
         print("  Install with: pip install python-docx")
@@ -1312,6 +1396,31 @@ def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path
 
     doc = Document()
     config = state.config
+
+    # ── Page numbers in footer ─────────────────────────────────────────────
+    def _add_page_numbers(doc):
+        section = doc.sections[0]
+        footer = section.footer
+        para = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+        para.clear()
+        para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        # "Page X of Y" using Word field codes
+        run = para.add_run()
+        fldChar1 = OxmlElement("w:fldChar")
+        fldChar1.set(qn("w:fldCharType"), "begin")
+        instrText = OxmlElement("w:instrText")
+        instrText.set(qn("xml:space"), "preserve")
+        instrText.text = "PAGE"
+        fldChar2 = OxmlElement("w:fldChar")
+        fldChar2.set(qn("w:fldCharType"), "end")
+        run._r.append(fldChar1)
+        run._r.append(instrText)
+        run._r.append(fldChar2)
+        run.font.name = "Palatino Linotype"
+        run.font.size = Pt(9)
+        run.font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+
+    _add_page_numbers(doc)
 
     style = doc.styles["Normal"]
     style.font.name = "Palatino Linotype"
@@ -1341,6 +1450,21 @@ def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path
     quote_style.font.size = Pt(11)
     quote_style.font.italic = True
 
+    # ── Title page ────────────────────────────────────────────────────────────
+    # Mantra header
+    mantra_para = doc.add_paragraph()
+    mantra_para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    mantra_run = mantra_para.add_run("Om Nithyananda Paramashivoham")
+    mantra_run.font.name = "Georgia"
+    mantra_run.font.size = Pt(13)
+    mantra_run.italic = True
+    mantra_run.font.color.rgb = RGBColor(0x8B, 0x60, 0x14)  # gold
+
+    # Spacer
+    doc.add_paragraph()
+    doc.add_paragraph()
+    doc.add_paragraph()
+
     title_para = doc.add_paragraph()
     title_para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
     title_run = title_para.add_run(config.title)
@@ -1366,6 +1490,41 @@ def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path
 
     doc.add_page_break()
 
+    # ── Copyright page ────────────────────────────────────────────────────────
+    import datetime as _dt
+    _year = _dt.date.today().year
+    copy_lines = [
+        "Om Nithyananda Paramashivoham",
+        "",
+        f"Copyright © {_year} KAILASA — The Ancient Enlightened Hindu Civilizational Nation",
+        "All rights reserved.",
+        "",
+        "Published by KAILASA Publishing",
+        "The Sovereign Jurisdiction of Shri Kailasa",
+        "",
+        "The teachings contained in this book are the divine utterances of",
+        "His Divine Holiness Bhagwan Sri Nithyananda Paramashivam,",
+        "The Reviver of KAILASA, The Living Avatar.",
+        "",
+        "No part of this publication may be reproduced, stored in a retrieval system,",
+        "or transmitted in any form or by any means — electronic, mechanical,",
+        "photocopying, recording, or otherwise — without the prior written permission",
+        "of KAILASA Publishing.",
+        "",
+        "For permissions and inquiries: publishing@kailaasa.org",
+        "",
+        "Compiled and offered at the lotus feet of",
+        "His Divine Holiness Bhagwan Sri Nithyananda Paramashivam",
+    ]
+    for line in copy_lines:
+        cp = doc.add_paragraph()
+        cp.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        cr = cp.add_run(line)
+        cr.font.name = "Palatino Linotype"
+        cr.font.size = Pt(10)
+        cr.font.color.rgb = RGBColor(0x44, 0x44, 0x44)
+    doc.add_page_break()
+
     if config.include_toc:
         doc.add_heading("Table of Contents", level=1)
         for ch in chapters:
@@ -1376,7 +1535,7 @@ def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path
         doc.add_page_break()
 
     if config.include_foreword and state.metadata and state.metadata.foreword:
-        doc.add_heading("Foreword", level=1)
+        doc.add_heading("Compiler's Note", level=1)
         doc.add_paragraph(state.metadata.foreword)
         doc.add_page_break()
 
@@ -1449,6 +1608,38 @@ def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path
                 entry += f" — {lnk.date}"
             entry += f"\n{lnk.url}"
             doc.add_paragraph(entry, style="Normal")
+
+    # ── Glossary ──────────────────────────────────────────────────────────────
+    glossary = getattr(state, "_glossary", None)
+    if glossary:
+        doc.add_page_break()
+        doc.add_heading("Glossary", level=1)
+        doc.add_paragraph(
+            "Sanskrit and spiritual terms used in this book:",
+            style="Normal",
+        )
+        doc.add_paragraph()
+        for term, definition in sorted(glossary.items()):
+            p = doc.add_paragraph()
+            term_run = p.add_run(f"{term}:  ")
+            term_run.bold = True
+            term_run.font.name = "Palatino Linotype"
+            def_run = p.add_run(definition)
+            def_run.font.name = "Palatino Linotype"
+
+    # ── Back cover ────────────────────────────────────────────────────────────
+    back_cover = getattr(state, "_back_cover", None)
+    if back_cover:
+        doc.add_page_break()
+        bc_para = doc.add_paragraph()
+        bc_para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        bc_run = bc_para.add_run("Om Nithyananda Paramashivoham")
+        bc_run.font.name = "Georgia"
+        bc_run.font.size = Pt(13)
+        bc_run.italic = True
+        bc_run.font.color.rgb = RGBColor(0x8B, 0x60, 0x14)
+        doc.add_paragraph()
+        _markdown_to_docx(doc, back_cover)
 
     doc.save(str(output_path))
 
@@ -1657,6 +1848,9 @@ async def run_pipeline(
 
         # ── Phase 5.6: Frontmatter (Foreword + Benediction) ───────────
         await run_frontmatter(state, app_config=app_config)
+
+        # ── Phase 5.65: Strip diacritics ───────────────────────────────
+        strip_diacritics(state)
 
         # ── Phase 5.7: Inject YouTube links into chapter footers ───────
         inject_youtube_links(state)
