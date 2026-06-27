@@ -1046,6 +1046,11 @@ async def run_qa_generation(
 
     mcp_conn: Optional[McpConnection] = getattr(state, "_mcp_conn", None)
 
+    # Build real source links per chapter from YouTube matching phase
+    real_links_by_chapter: Dict[int, List[Any]] = {}
+    for lnk in (state.all_source_links or []):
+        real_links_by_chapter.setdefault(lnk.chapter_number, []).append(lnk)
+
     async def generate_qa_one(brief: ChapterBrief) -> Optional[ChapterQA]:
         edited_ch = state.edited.get(brief.chapter_number)
         if not edited_ch:
@@ -1058,9 +1063,11 @@ async def run_qa_generation(
         elif tools:
             agent_tools = tools
 
+        real_links = real_links_by_chapter.get(brief.chapter_number, [])
         agent = qa_generator_agent(
             state.config, brief,
             chapter_content=edited_ch.content_markdown,
+            source_links=real_links,
             tools=agent_tools or [],
             config=cfg,
         )
@@ -1072,12 +1079,12 @@ async def run_qa_generation(
         )
 
         if isinstance(response.content, ChapterQA):
+            _strip_fake_youtube_urls(response.content)
             return response.content
 
         # Fallback: try to parse raw text
         raw = str(response.content or "").strip()
         if raw:
-            # Build a minimal ChapterQA from raw text if structured output failed
             return ChapterQA(
                 chapter_number=brief.chapter_number,
                 chapter_title=brief.title,
@@ -1119,6 +1126,23 @@ async def run_qa_generation(
 
     print(f"  Q&A generation complete: {len(state.chapter_qa)} chapters, {total_pairs} total pairs")
     state.save_snapshot()
+
+
+_FAKE_YT_URL_RE = re.compile(
+    r"https?://(?:www\.)?(?:youtu\.be/|youtube\.com/watch\?v=)([A-Za-z0-9_-]{1,10})"
+)
+
+def _strip_fake_youtube_urls(qa: ChapterQA) -> None:
+    """Remove hallucinated YouTube URLs from source_reference fields.
+
+    Real YouTube video IDs are exactly 11 characters. Anything shorter is fake.
+    """
+    for pair in qa.qa_pairs:
+        def _scrub(m: re.Match) -> str:
+            video_id = m.group(1)
+            return "" if len(video_id) < 11 else m.group(0)
+        cleaned = _FAKE_YT_URL_RE.sub(_scrub, pair.source_reference).strip(" ,;—–-")
+        pair.source_reference = cleaned
 
 
 def _render_qa_markdown(chapter_qa: ChapterQA) -> str:

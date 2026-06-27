@@ -881,6 +881,7 @@ def qa_generator_agent(
     book_config: BookConfig,
     chapter_brief: ChapterBrief,
     chapter_content: str,
+    source_links: Optional[List[Any]] = None,
     tools: Optional[List[Any]] = None,
     config: Optional[AppConfig] = None,
 ) -> Agent:
@@ -921,15 +922,29 @@ def qa_generator_agent(
             "  - Ends decisively — no hedging",
             "",
             "SOURCE INSTRUCTIONS:",
-            "  - Use MCP to search for 2-3 related transcripts on this chapter's topics",
             "  - Answers should draw from Swamiji's broader teachings, not just this chapter",
-            "  - Call search_chapters on SPH with the chapter's main topic (max 3 tool calls)",
-            "  - If a source transcript contains a YouTube URL, include it in source_reference",
+            "  - Use MCP to search for 2-3 related transcripts on this chapter's topics (max 3 tool calls)",
+            "  - REAL YouTube source links for this chapter are listed below — use these ONLY",
+            "  - NEVER invent, guess, or fabricate YouTube URLs",
+            "  - If you do not have a real URL, leave source_reference as plain text title only — no URL",
             "",
             "TOOL NAME RULES:",
             "  UNDERSCORES for SPH: search_chapters  get_chapter  list_books",
             "  HYPHENS for Jnanalaya: search-books  read-chapter  get-chapters",
             "",
+            *(
+                [
+                    "VERIFIED SOURCE LINKS FOR THIS CHAPTER (use these URLs only):",
+                    *[f"  - {lnk.title}: {lnk.url}" for lnk in (source_links or [])],
+                    "",
+                ]
+                if source_links
+                else [
+                    "No verified YouTube links available for this chapter.",
+                    "Leave source_reference as title/description text only — no URL.",
+                    "",
+                ]
+            ),
             f"Chapter topics: {', '.join(chapter_brief.teaching_points)}",
             "",
             "Chapter content (what was just taught):",
