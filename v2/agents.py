@@ -1196,3 +1196,47 @@ def kailasa_introduction_agent(
         tools=[],
         markdown=False,
     )
+
+
+# ── 15. References Agent ───────────────────────────────────────────────────
+
+def references_agent(
+    book_config: "BookConfig",
+    blueprint: "BookBlueprint",
+    config: Optional["AppConfig"] = None,
+) -> Agent:
+    """Generates a references/bibliography list of canonical texts for the book."""
+    return Agent(
+        name="References Writer",
+        role="Compile a references list of canonical scriptural and spiritual texts relevant to this book.",
+        model=build_agent_model("editor", config),
+        instructions=[
+            f"Compile a References section for the book '{book_config.title}'.",
+            "",
+            "List the canonical scriptural texts, traditional scriptures, and major works",
+            "of His Divine Holiness Bhagwan Sri Nithyananda Paramashivam that are",
+            "directly relevant to the themes of this book.",
+            "",
+            "Categories to include (only those relevant to the book's themes):",
+            "  1. Primary Scriptures — Vedas, Upanishads, Agamas, Puranas relevant to the themes",
+            "  2. Works of The SPH — books by His Divine Holiness on these themes",
+            "  3. Classical Commentaries — key acharyas (Adi Shankaracharya, Abhinavagupta, etc.)",
+            "",
+            "Format each entry as:",
+            "  Author/Source. *Title*. Publisher/Tradition, if known.",
+            "",
+            "Rules:",
+            "  - Only include texts genuinely relevant to the book's themes",
+            "  - Do NOT invent titles or fabricate references",
+            "  - Do NOT add diacritical marks",
+            "  - 15–25 references total",
+            "  - Group by category with a bold category heading",
+            "",
+            f"Book themes: {', '.join(book_config.themes)}",
+            f"Thematic arc: {blueprint.thematic_arc}",
+            "",
+            "Output ONLY the formatted references. No commentary.",
+        ],
+        tools=[],
+        markdown=True,
+    )

@@ -59,6 +59,7 @@ from agents import (
     qa_agent,
     qa_generator_agent,
     targeted_qa_agent,
+    references_agent,
     researcher_agent,
     sph_introduction_agent,
     sph_message_agent,
@@ -1305,6 +1306,15 @@ async def run_frontmatter(
     ))
     task_labels.append("glossary")
 
+    # References
+    ref_ag = references_agent(state.config, state.blueprint, cfg)
+    tasks.append(tracer.traced_arun(
+        ref_ag,
+        f"Compile a references list for '{state.config.title}'.",
+        phase="Frontmatter-References",
+    ))
+    task_labels.append("references")
+
     # Back cover
     bc_ag = back_cover_agent(state.config, state.blueprint, cfg)
     tasks.append(tracer.traced_arun(
@@ -1350,6 +1360,7 @@ async def run_frontmatter(
     sph_message_text = ""
     sph_intro_text = ""
     kailasa_intro_text = ""
+    references_text = ""
 
     for label, result in zip(task_labels, results):
         if isinstance(result, Exception):
@@ -1392,6 +1403,10 @@ async def run_frontmatter(
             kailasa_intro_text = text
             print(f"  Introduction to KAILASA: {wc} words")
             write_text(state.output_dir / "kailasa_intro.md", text)
+        elif label == "references":
+            references_text = text
+            print(f"  References: {wc} words")
+            write_text(state.output_dir / "references.md", text)
 
     # Attach to state so run_designer can pick them up
     state._foreword = foreword_text
@@ -1401,6 +1416,7 @@ async def run_frontmatter(
     state._sph_message = sph_message_text
     state._sph_intro = sph_intro_text
     state._kailasa_intro = kailasa_intro_text
+    state._references = references_text
 
 
 # ── Phase 6: Design (.docx) ───────────────────────────────────────────────
@@ -1720,6 +1736,51 @@ def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path
             term_run.font.name = "Palatino Linotype"
             def_run = p.add_run(definition)
             def_run.font.name = "Palatino Linotype"
+
+    # ── References ────────────────────────────────────────────────────────────
+    references = getattr(state, "_references", "")
+    if references:
+        doc.add_page_break()
+        doc.add_heading("References", level=1)
+        _markdown_to_docx(doc, references)
+
+    # ── Appendix: KAILASA eCitizen ────────────────────────────────────────────
+    doc.add_page_break()
+    doc.add_heading("Appendix: Connect with KAILASA", level=1)
+    appendix_lines = [
+        "Om Nithyananda Paramashivoham",
+        "",
+        "Every seeker is a citizen of KAILASA by nature. KAILASA is not a distant place —",
+        "it is the living state of Paramashiva's presence, available to you now.",
+        "",
+        "KAILASA eCitizen Platform",
+        "",
+        "Through the KAILASA eCitizen platform, you can:",
+        "  - Register as a KAILASA eCitizen and receive your citizenship",
+        "  - Access Swamiji's satsangs, books, and initiations",
+        "  - Participate in Vedic programs and temple services",
+        "  - Connect with the global KAILASA community",
+        "  - Apply for KAILASA seva opportunities",
+        "",
+        "Visit: https://kailaasa.org/ecitizen",
+        "",
+        "Live Satsangs",
+        "",
+        "His Divine Holiness gives live satsangs regularly. Subscribe to the",
+        "official YouTube channel to receive His direct transmissions:",
+        "",
+        "YouTube: https://www.youtube.com/@SriNithyananda",
+        "",
+        "May Paramashiva's grace guide every step of your journey.",
+        "",
+        "Om Nithyananda Paramashivoham",
+        "Jai KAILASA!",
+    ]
+    for line in appendix_lines:
+        ap = doc.add_paragraph()
+        ar = ap.add_run(line)
+        ar.font.name = "Palatino Linotype"
+        ar.font.size = Pt(11)
 
     # ── Back cover ────────────────────────────────────────────────────────────
     back_cover = getattr(state, "_back_cover", None)
