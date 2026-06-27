@@ -1190,20 +1190,32 @@ _DIACRITIC_MAP = str.maketrans({
 
 
 def strip_diacritics(state: "PipelineState") -> None:
-    """Remove Sanskrit diacritical marks from all chapter content."""
-    if not state.edited:
-        return
+    """Remove Sanskrit diacritical marks from all generated text."""
+    def _clean(text: str) -> str:
+        return text.translate(_DIACRITIC_MAP)
+
     removed = 0
-    for ch in state.edited.values():
-        cleaned = ch.content_markdown.translate(_DIACRITIC_MAP)
+    for ch in (state.edited or {}).values():
+        cleaned = _clean(ch.content_markdown)
         if cleaned != ch.content_markdown:
             removed += 1
         ch.content_markdown = cleaned
-    if state._foreword:
-        state._foreword = state._foreword.translate(_DIACRITIC_MAP)
-    if state._benediction:
-        state._benediction = state._benediction.translate(_DIACRITIC_MAP)
-    print(f"\n  Diacritics stripped from {removed} chapter(s)")
+
+    # Front/back matter — strip all new state attributes
+    for attr in (
+        "_foreword", "_benediction", "_sph_message", "_sph_intro",
+        "_kailasa_intro", "_back_cover", "_references",
+    ):
+        val = getattr(state, attr, "")
+        if val:
+            setattr(state, attr, _clean(val))
+
+    # Glossary dict values
+    glossary = getattr(state, "_glossary", {})
+    if glossary:
+        state._glossary = {k: _clean(v) for k, v in glossary.items()}
+
+    print(f"\n  Diacritics stripped from {removed} chapter(s) + all front/back matter")
 
 
 # ── Phase 5.7: Inject YouTube links into chapters ────────────────────────

@@ -319,11 +319,13 @@ def content_writer_agent(
             *section_instructions,
             "",
             "SHASTRA REFERENCE RULES:",
-            "  - ALWAYS include the original Sanskrit shloka/sutra in italics,",
-            "    followed by the exact source reference, then the English translation.",
-            "  - Format: *yogaḥ karmasu kauśalam* — Bhagavad Gita 2.50 — 'Yoga is skill in action.'",
-            "  - If the research provides Sanskrit text, use it exactly.",
-            "  - The Teaching section MUST include at least one exact Sanskrit verse.",
+            "  - Only quote a Sanskrit verse if it is explicitly present in the satsang transcript",
+            "    or research material provided below — do NOT invent or fabricate any verse.",
+            "  - If the research provides a Sanskrit text verbatim, you may quote it with source.",
+            "  - Format: *yogah karmasu kaushalam* — Bhagavad Gita 2.50 — 'Yoga is skill in action.'",
+            "  - Do NOT add diacritical marks — plain ASCII Sanskrit only.",
+            "  - If no verified verse is available, convey the shastric teaching in Swamiji's own words.",
+            "  - NEVER fabricate a citation, chapter number, or verse number.",
             "",
             prior_context,
             research_context,
@@ -650,9 +652,11 @@ def _build_section_instructions(template: List[str], wf) -> List[str]:
         ),
         "teaching": (
             f"### The Teaching:\n"
-            f"  Begin with the EXACT Sanskrit verse/shloka in italics, its source, and English translation.\n"
+            f"  Open with the core insight in Swamiji's direct voice.\n"
+            f"  If a Sanskrit verse is present in the satsang/research material, quote it exactly:\n"
             f"  Format: *<sanskrit text>* — <Source Book Chapter.Verse> — '<English translation>'\n"
-            f"  Then unpack the verse's meaning layer by layer.\n"
+            f"  NEVER fabricate a Sanskrit verse or citation — if none is available, skip it.\n"
+            f"  Do NOT add diacritical marks — use plain ASCII Sanskrit only.\n"
             f"  Layer 3-4 teaching insights that build on each other.\n"
             f"  Use real-world analogies (work, relationships, daily life).\n"
             f"  End with a clear, memorable 'enlightenment statement'.\n"
@@ -764,7 +768,7 @@ def qa_agent(
             "REFERENCE STANDARD — Living Enlightenment by Paramahamsa Nithyananda:",
             "  - First person Guruvaak — Swamiji speaks directly, not about himself",
             "  - Stories are vivid, sensory, set in real-life ashram/devotee contexts",
-            "  - Teachings are anchored in exact Sanskrit shlokas with source + translation",
+            "  - Teachings use Sanskrit terms naturally; verses only quoted when present in source material",
             "  - Tone is fierce yet compassionate, never dry or academic",
             "  - Key phrases: 'Understand', 'I tell you', 'In Sanatana Hindu Dharma we say'",
             "  - Each chapter flows like a live satsang: story → teaching → practice → humor → bridge",
@@ -783,7 +787,7 @@ def qa_agent(
             "SCORING CRITERIA (per chapter):",
             "  voice_score (1-10):     Does it sound like Swamiji in Living Enlightenment?",
             "  structure_score (1-10): All sections present with depth? (story, teaching, exercise, humor, bridge)",
-            "  shastra_score (1-10):   Are Sanskrit verses exact, properly cited with source + translation?",
+            "  shastra_score (1-10):   Sanskrit used authentically? No fabricated verses or fake citations?",
             "  story_score (1-10):     Living Enlightenment story quality check:",
             "      - Does it use one of these formats: short parable/joke, Swamiji's own experience,",
             "        devotee encounter, or real-life incident? (NOT always the same format)",
@@ -1101,6 +1105,12 @@ def sph_message_agent(
             "",
             "This is Swamiji speaking directly to the reader — intimate, powerful, personal.",
             "It is 200–300 words. Written in first person as Swamiji.",
+            "",
+            "CRITICAL RULES:",
+            "  - Do NOT quote or invent any Sanskrit verse, sloka, or scripture reference.",
+            "  - Do NOT add diacritical marks (no a with macron, no s with dot, etc.) — plain ASCII only.",
+            "  - Do NOT fabricate any citation, book reference, or Agama verse.",
+            "  - Speak purely in Swamiji's own living voice — no academic quoting.",
             "",
             "Structure (continuous prose, no headings):",
             "  1. A direct address to the reader — 'Beloved' or 'You who hold this book'.",
