@@ -1510,16 +1510,27 @@ def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path
 
     _add_page_numbers(doc)
 
+    # ── Page margins ───────────────────────────────────────────────────────────
+    section = doc.sections[0]
+    section.top_margin    = Inches(1.0)
+    section.bottom_margin = Inches(1.0)
+    section.left_margin   = Inches(1.15)
+    section.right_margin  = Inches(1.15)
+
+    # ── Normal body style ──────────────────────────────────────────────────────
     style = doc.styles["Normal"]
     style.font.name = "Palatino Linotype"
-    style.font.size = Pt(11)
+    style.font.size = Pt(11.5)
     style.font.color.rgb = RGBColor(0x2C, 0x2C, 0x2C)
+    style.paragraph_format.space_after  = Pt(8)
+    style.paragraph_format.space_before = Pt(0)
+    style.paragraph_format.line_spacing = Pt(17)  # comfortable reading line height
 
     for level, (name_suffix, size, bold, color) in {
-        0: ("Title", 28, True, RGBColor(0x1A, 0x1A, 0x2E)),
+        0: ("Title",    28, True, RGBColor(0x1A, 0x1A, 0x2E)),
         1: ("Heading 1", 22, True, RGBColor(0x1A, 0x1A, 0x2E)),
-        2: ("Heading 2", 14, True, RGBColor(0x0F, 0x34, 0x60)),
-        3: ("Heading 3", 12, True, RGBColor(0x0F, 0x34, 0x60)),
+        2: ("Heading 2", 15, True, RGBColor(0x0F, 0x34, 0x60)),
+        3: ("Heading 3", 12, True, RGBColor(0x5A, 0x3E, 0x10)),
     }.items():
         try:
             h_style = doc.styles[name_suffix]
@@ -1530,13 +1541,30 @@ def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path
         h_style.font.bold = bold
         h_style.font.color.rgb = color
 
+    # Heading spacing
+    for h_name, space_before, space_after in [
+        ("Heading 1", 24, 10),
+        ("Heading 2", 16, 6),
+        ("Heading 3", 12, 4),
+    ]:
+        try:
+            hs = doc.styles[h_name]
+            hs.paragraph_format.space_before = Pt(space_before)
+            hs.paragraph_format.space_after  = Pt(space_after)
+        except KeyError:
+            pass
+
     try:
         quote_style = doc.styles["Quote"]
     except KeyError:
         quote_style = doc.styles.add_style("Quote", WD_STYLE_TYPE.PARAGRAPH)
     quote_style.font.name = "Palatino Linotype"
-    quote_style.font.size = Pt(11)
+    quote_style.font.size = Pt(11.5)
     quote_style.font.italic = True
+    quote_style.paragraph_format.left_indent  = Inches(0.5)
+    quote_style.paragraph_format.right_indent = Inches(0.5)
+    quote_style.paragraph_format.space_before = Pt(8)
+    quote_style.paragraph_format.space_after  = Pt(8)
 
     # ── Title page ────────────────────────────────────────────────────────────
     # Mantra header
@@ -1799,8 +1827,103 @@ def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path
     doc.save(str(output_path))
 
 
+_PRACTICE_KEYWORDS = re.compile(
+    r"practical exercise|meditation|practice|technique|sadhana|kriya|pranayama|dhyana",
+    re.IGNORECASE,
+)
+
+
+def _shade_paragraph(para, hex_color: str = "FFF8E7") -> None:
+    """Apply background shading to a paragraph via OOXML."""
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    pPr = para._p.get_or_add_pPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), hex_color)
+    pPr.append(shd)
+
+
+def _border_paragraph(para) -> None:
+    """Add a left accent border to a paragraph."""
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    from docx.shared import Pt
+    pPr = para._p.get_or_add_pPr()
+    pBdr = OxmlElement("w:pBdr")
+    left = OxmlElement("w:left")
+    left.set(qn("w:val"), "thick")
+    left.set(qn("w:sz"), "24")
+    left.set(qn("w:space"), "8")
+    left.set(qn("w:color"), "8B6014")
+    pBdr.append(left)
+    pPr.append(pBdr)
+
+
+def _render_practice_section(doc, title: str, body_lines: list) -> None:
+    """Render a Practical Exercise / Meditation section as a formatted instruction box."""
+    from docx.shared import Pt, RGBColor, Inches
+    from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+
+    # Title bar
+    title_para = doc.add_paragraph()
+    _shade_paragraph(title_para, "F5E6C8")
+    _border_paragraph(title_para)
+    title_para.paragraph_format.space_before = Pt(10)
+    title_para.paragraph_format.space_after = Pt(2)
+    title_para.paragraph_format.left_indent = Inches(0.15)
+    tr = title_para.add_run(f"  {title}")
+    tr.bold = True
+    tr.font.name = "Georgia"
+    tr.font.size = Pt(13)
+    tr.font.color.rgb = RGBColor(0x8B, 0x60, 0x14)
+
+    for raw in body_lines:
+        stripped = raw.strip()
+        if not stripped:
+            continue
+
+        step_match = re.match(r"^(\d+)\.\s+(.*)", stripped)
+        if step_match:
+            # Numbered step — bold step number, indent
+            p = doc.add_paragraph()
+            _shade_paragraph(p, "FFFDF5")
+            _border_paragraph(p)
+            p.paragraph_format.left_indent = Inches(0.3)
+            p.paragraph_format.space_before = Pt(4)
+            p.paragraph_format.space_after = Pt(2)
+            step_run = p.add_run(f"Step {step_match.group(1)}: ")
+            step_run.bold = True
+            step_run.font.name = "Palatino Linotype"
+            step_run.font.size = Pt(11)
+            step_run.font.color.rgb = RGBColor(0x8B, 0x60, 0x14)
+            body_run = p.add_run(step_match.group(2))
+            body_run.font.name = "Palatino Linotype"
+            body_run.font.size = Pt(11)
+        elif stripped.startswith("- ") or stripped.startswith("* "):
+            p = doc.add_paragraph()
+            _shade_paragraph(p, "FFFDF5")
+            _border_paragraph(p)
+            p.paragraph_format.left_indent = Inches(0.45)
+            p.paragraph_format.space_before = Pt(2)
+            _add_formatted_runs(p, "• " + stripped[2:])
+        else:
+            p = doc.add_paragraph()
+            _shade_paragraph(p, "FFFDF5")
+            _border_paragraph(p)
+            p.paragraph_format.left_indent = Inches(0.2)
+            p.paragraph_format.space_before = Pt(3)
+            p.paragraph_format.space_after = Pt(3)
+            _add_formatted_runs(p, stripped)
+
+    # Closing spacer
+    spacer = doc.add_paragraph()
+    spacer.paragraph_format.space_after = Pt(8)
+
+
 def _markdown_to_docx(doc, markdown: str) -> None:
-    """Simple markdown-to-docx converter for chapter content."""
+    """Markdown-to-docx converter. Practice/meditation sections get infographic styling."""
     lines = markdown.split("\n")
     i = 0
     while i < len(lines):
@@ -1812,7 +1935,23 @@ def _markdown_to_docx(doc, markdown: str) -> None:
             continue
 
         if stripped.startswith("### "):
-            doc.add_heading(stripped[4:], level=3)
+            heading_text = stripped[4:]
+            # Check if this is a practice/meditation section
+            if _PRACTICE_KEYWORDS.search(heading_text):
+                # Collect all body lines until the next ### or ## heading
+                body_lines = []
+                j = i + 1
+                while j < len(lines):
+                    next_stripped = lines[j].strip()
+                    if next_stripped.startswith("### ") or next_stripped.startswith("## ") or next_stripped.startswith("# "):
+                        break
+                    body_lines.append(lines[j])
+                    j += 1
+                _render_practice_section(doc, heading_text, body_lines)
+                i = j  # skip the body lines we already consumed
+                continue
+            else:
+                doc.add_heading(heading_text, level=3)
         elif stripped.startswith("## "):
             pass
         elif stripped.startswith("# "):
