@@ -1065,3 +1065,119 @@ def back_cover_agent(
         tools=[],
         markdown=True,
     )
+
+
+# ── 12. Message of The SPH Agent ──────────────────────────────────────────
+
+def sph_message_agent(
+    book_config: "BookConfig",
+    blueprint: "BookBlueprint",
+    config: Optional["AppConfig"] = None,
+) -> Agent:
+    """Writes a short message from The SPH to the reader of this specific book."""
+    return Agent(
+        name="SPH Message Writer",
+        role="Write a personal message from His Divine Holiness to the reader of this book.",
+        model=build_agent_model("foreword", config),
+        instructions=[
+            f"Write a short 'Message from The SPH' for the book '{book_config.title}'.",
+            "",
+            SWAMIJI_VOICE,
+            "",
+            "This is Swamiji speaking directly to the reader — intimate, powerful, personal.",
+            "It is 200–300 words. Written in first person as Swamiji.",
+            "",
+            "Structure (continuous prose, no headings):",
+            "  1. A direct address to the reader — 'Beloved' or 'You who hold this book'.",
+            "  2. Why this specific teaching matters right now in this age of Kali.",
+            "  3. A direct transmission — not a description of the teaching, but the teaching itself.",
+            "  4. A single powerful command or invitation.",
+            "  5. Close with the signature: 'With infinite love and grace,\\nNithyananda'",
+            "",
+            f"Book title: {book_config.title}",
+            f"Core themes: {', '.join(book_config.themes)}",
+            "",
+            "Output ONLY the message prose. No heading. No commentary.",
+        ],
+        tools=[],
+        markdown=False,
+    )
+
+
+# ── 13. Introduction to The SPH Agent ─────────────────────────────────────
+
+def sph_introduction_agent(
+    config: Optional["AppConfig"] = None,
+) -> Agent:
+    """Writes a formal introduction to His Divine Holiness Bhagwan Sri Nithyananda Paramashivam."""
+    return Agent(
+        name="SPH Introduction Writer",
+        role="Write the canonical introduction to His Divine Holiness Bhagwan Sri Nithyananda Paramashivam.",
+        model=build_agent_model("editor", config),
+        instructions=[
+            "Write the 'Introduction to The SPH' section for a KAILASA publication.",
+            "",
+            "This is a formal, reverent introduction to:",
+            "His Divine Holiness Bhagwan Sri Nithyananda Paramashivam",
+            "  — The reviver of KAILASA, the Ancient Enlightened Hindu Civilizational Nation",
+            "  — Living Avatar and incarnation of Paramashiva",
+            "  — Jagadguru (World Teacher) of Sanatana Dharma",
+            "",
+            "Length: 400–500 words. Written in third person, formal and reverential.",
+            "",
+            "Cover the following (weave naturally, do not use sub-headings):",
+            "  1. Who He is — His divine identity as the living incarnation of Paramashiva.",
+            "  2. His mission — reviving authentic Sanatana Dharma and KAILASA.",
+            "  3. His contributions — over 500 books, thousands of discourses (satsangs),",
+            "     revival of 108+ Vedic sciences, establishment of temples, gurukuls,",
+            "     universities, and humanitarian initiatives worldwide.",
+            "  4. His teachings — non-dual Shaiva Siddhanta, the science of enlightenment,",
+            "     lived Advaita, and the manifestation of Paramashiva's powers (shaktis).",
+            "  5. His presence — available to seekers worldwide through satsangs, books,",
+            "     and the KAILASA eCitizen platform.",
+            "",
+            "Do NOT add diacritical marks on Sanskrit words.",
+            "End with: 'Om Nithyananda Paramashivoham'",
+            "",
+            "Output ONLY the introduction prose. No heading. No commentary.",
+        ],
+        tools=[],
+        markdown=False,
+    )
+
+
+# ── 14. Introduction to KAILASA Agent ─────────────────────────────────────
+
+def kailasa_introduction_agent(
+    config: Optional["AppConfig"] = None,
+) -> Agent:
+    """Writes the canonical introduction to KAILASA."""
+    return Agent(
+        name="KAILASA Introduction Writer",
+        role="Write the canonical introduction to KAILASA — the Ancient Enlightened Hindu Civilizational Nation.",
+        model=build_agent_model("editor", config),
+        instructions=[
+            "Write the 'Introduction to KAILASA' section for a KAILASA publication.",
+            "",
+            "Length: 350–450 words. Written in third person, formal and reverential.",
+            "",
+            "Cover the following (weave naturally, no sub-headings):",
+            "  1. What KAILASA is — the sovereign nation revived by His Divine Holiness",
+            "     Bhagwan Sri Nithyananda Paramashivam to preserve and radiate",
+            "     Sanatana Dharma for all of humanity.",
+            "  2. Its spiritual foundation — rooted in the oldest living spiritual tradition,",
+            "     the unbroken lineage of Shaiva Siddhanta and Advaita Vedanta.",
+            "  3. What KAILASA offers — citizenship, temples, universities, gurukuls,",
+            "     Vedic sciences, humanitarian services, and a living Vedic culture.",
+            "  4. The eCitizen platform — how seekers anywhere in the world can connect",
+            "     with KAILASA's resources, receive initiations, and serve Sanatana Dharma.",
+            "  5. An invitation — every sincere seeker is a citizen of KAILASA by nature.",
+            "",
+            "Do NOT add diacritical marks on Sanskrit words.",
+            "End with: 'Jai KAILASA! Om Nithyananda Paramashivoham'",
+            "",
+            "Output ONLY the introduction prose. No heading. No commentary.",
+        ],
+        tools=[],
+        markdown=False,
+    )

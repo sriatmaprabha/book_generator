@@ -55,10 +55,13 @@ from agents import (
     foreword_agent,
     glossary_agent,
     intake_agent,
+    kailasa_introduction_agent,
     qa_agent,
     qa_generator_agent,
     targeted_qa_agent,
     researcher_agent,
+    sph_introduction_agent,
+    sph_message_agent,
     story_writer_agent,
     writer_agent,
     STORY_FORMAT_CYCLE,
@@ -1287,12 +1290,42 @@ async def run_frontmatter(
     ))
     task_labels.append("back_cover")
 
+    # Message of The SPH
+    msg_ag = sph_message_agent(state.config, state.blueprint, cfg)
+    tasks.append(tracer.traced_arun(
+        msg_ag,
+        f"Write Swamiji's personal message to the reader of '{state.config.title}'.",
+        phase="Frontmatter-SPHMessage",
+    ))
+    task_labels.append("sph_message")
+
+    # Introduction to The SPH
+    sph_intro_ag = sph_introduction_agent(cfg)
+    tasks.append(tracer.traced_arun(
+        sph_intro_ag,
+        "Write the canonical introduction to His Divine Holiness.",
+        phase="Frontmatter-SPHIntro",
+    ))
+    task_labels.append("sph_intro")
+
+    # Introduction to KAILASA
+    kailasa_ag = kailasa_introduction_agent(cfg)
+    tasks.append(tracer.traced_arun(
+        kailasa_ag,
+        "Write the canonical introduction to KAILASA.",
+        phase="Frontmatter-KAILASA",
+    ))
+    task_labels.append("kailasa_intro")
+
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     foreword_text = ""
     benediction_text = ""
     glossary: Dict[str, str] = {}
     back_cover_text = ""
+    sph_message_text = ""
+    sph_intro_text = ""
+    kailasa_intro_text = ""
 
     for label, result in zip(task_labels, results):
         if isinstance(result, Exception):
@@ -1323,12 +1356,27 @@ async def run_frontmatter(
             back_cover_text = text
             print(f"  Back cover: {wc} words")
             write_text(state.output_dir / "back_cover.md", text)
+        elif label == "sph_message":
+            sph_message_text = text
+            print(f"  Message of The SPH: {wc} words")
+            write_text(state.output_dir / "sph_message.md", text)
+        elif label == "sph_intro":
+            sph_intro_text = text
+            print(f"  Introduction to The SPH: {wc} words")
+            write_text(state.output_dir / "sph_intro.md", text)
+        elif label == "kailasa_intro":
+            kailasa_intro_text = text
+            print(f"  Introduction to KAILASA: {wc} words")
+            write_text(state.output_dir / "kailasa_intro.md", text)
 
     # Attach to state so run_designer can pick them up
     state._foreword = foreword_text
     state._benediction = benediction_text
     state._glossary = glossary
     state._back_cover = back_cover_text
+    state._sph_message = sph_message_text
+    state._sph_intro = sph_intro_text
+    state._kailasa_intro = kailasa_intro_text
 
 
 # ── Phase 6: Design (.docx) ───────────────────────────────────────────────
@@ -1525,6 +1573,33 @@ def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path
         cr.font.color.rgb = RGBColor(0x44, 0x44, 0x44)
     doc.add_page_break()
 
+    # ── Message of The SPH ────────────────────────────────────────────────────
+    sph_message = getattr(state, "_sph_message", "")
+    if sph_message:
+        doc.add_heading("Message from The SPH", level=1)
+        doc.add_paragraph(sph_message)
+        doc.add_page_break()
+
+    # ── Introduction to The SPH ───────────────────────────────────────────────
+    sph_intro = getattr(state, "_sph_intro", "")
+    if sph_intro:
+        doc.add_heading("Introduction to The SPH", level=1)
+        doc.add_paragraph(sph_intro)
+        doc.add_page_break()
+
+    # ── Introduction to KAILASA ───────────────────────────────────────────────
+    kailasa_intro = getattr(state, "_kailasa_intro", "")
+    if kailasa_intro:
+        doc.add_heading("Introduction to KAILASA", level=1)
+        doc.add_paragraph(kailasa_intro)
+        doc.add_page_break()
+
+    # ── Compiler's Note ───────────────────────────────────────────────────────
+    if config.include_foreword and state.metadata and state.metadata.foreword:
+        doc.add_heading("Compiler's Note", level=1)
+        doc.add_paragraph(state.metadata.foreword)
+        doc.add_page_break()
+
     if config.include_toc:
         doc.add_heading("Table of Contents", level=1)
         for ch in chapters:
@@ -1532,11 +1607,6 @@ def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path
                 f"Chapter {ch.chapter_number}: {ch.title}",
                 style="Normal",
             )
-        doc.add_page_break()
-
-    if config.include_foreword and state.metadata and state.metadata.foreword:
-        doc.add_heading("Compiler's Note", level=1)
-        doc.add_paragraph(state.metadata.foreword)
         doc.add_page_break()
 
     # Build a map of section_group → first chapter_number so we know when to insert dividers
