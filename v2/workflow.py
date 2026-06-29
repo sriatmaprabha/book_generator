@@ -21,6 +21,7 @@ Every agent call is traced via Tracer — full input/output logged to
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import re
 from datetime import datetime
@@ -1517,6 +1518,45 @@ async def run_designer(
     return docx_path
 
 
+def _add_qr_code(doc: "Document", state: "PipelineState") -> None:
+    """Insert a QR code image into the doc linking to the source satsang or KAILASA eCitizen."""
+    try:
+        import qrcode
+        from docx.shared import Inches
+    except ImportError:
+        return  # silently skip if qrcode/Pillow not installed
+
+    # Prefer a matched YouTube link from the book, else fall back to eCitizen
+    url = "https://kailasa.nithyananda.org/ecitizen"
+    if state.all_source_links:
+        url = state.all_source_links[0].url
+
+    # Allow explicit override via book config
+    satsang_url = getattr(state.config, "satsang_url", None)
+    if satsang_url:
+        url = satsang_url
+
+    qr = qrcode.QRCode(box_size=6, border=2)
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+
+    from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+    p = doc.add_paragraph()
+    p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    run = p.add_run()
+    run.add_picture(buf, width=Inches(1.2))
+
+    caption = doc.add_paragraph("Scan to watch the source satsang")
+    caption.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    for run in caption.runs:
+        run.font.size = __import__("docx").shared.Pt(8)
+
+
 def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path: Path) -> None:
     """Build a styled .docx file from edited chapters."""
     try:
@@ -1702,6 +1742,7 @@ def _build_docx(state: PipelineState, chapters: List[EditedChapter], output_path
     if sph_intro:
         doc.add_heading("Introduction to The SPH", level=1)
         doc.add_paragraph(sph_intro)
+        _add_qr_code(doc, state)
         doc.add_page_break()
 
     # ── Introduction to KAILASA ───────────────────────────────────────────────
