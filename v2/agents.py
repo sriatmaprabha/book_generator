@@ -1145,6 +1145,40 @@ def sph_message_agent(
     )
 
 
+# ── SPH Introduction — canonical facts block (update these when stats change) ──
+
+_SPH_INTRO_FACTS = """
+CANONICAL FACTS — use these exactly as given. Do not alter, invent, or omit any of them.
+
+Full title:
+  His Divine Holiness Bhagwan Sri Nithyananda Paramashivam
+
+Divine identity:
+  Revered, recognized, and worshipped as an Incarnation of Paramashiva
+  according to Hindu scriptures and the testimony of enlightened masters.
+
+Early life:
+  He was recognized and identified by a group of enlightened masters at the time of His birth.
+  At the age of 3, He was initiated into Bala Sanyas (the monastic order for children).
+  He is the reviver of KAILASA, the Ancient Enlightened Hindu Civilizational Nation.
+
+Role and titles:
+  Supreme Pontiff of Hinduism — coronated and enthroned in this sacred role.
+  Jagadguru — World Teacher of Sanatana Dharma.
+  Reviver of authentic Vedic civilization and the living embodiment of Paramashiva.
+
+Contributions (include these data points):
+  - Authored over 500 books on Vedic sciences, enlightenment, and Sanatana Dharma.
+  - Delivered tens of thousands of satsangs (spiritual discourses) over decades.
+  - Revived 108+ authentic Vedic sciences, arts, and practices.
+  - Established temples, gurukuls, universities, and humanitarian initiatives worldwide.
+  - Founded the KAILASA eCitizen platform connecting seekers globally to living Vedic culture.
+
+Teachings:
+  Non-dual Shaiva Siddhanta, lived Advaita, Paramadvaita — the direct science of
+  experiencing and manifesting Paramashiva consciousness in everyday life.
+"""
+
 # ── 13. Introduction to The SPH Agent ─────────────────────────────────────
 
 def sph_introduction_agent(
@@ -1158,27 +1192,34 @@ def sph_introduction_agent(
         instructions=[
             "Write the 'Introduction to The SPH' section for a KAILASA publication.",
             "",
-            "This is a formal, reverent introduction to:",
-            "His Divine Holiness Bhagwan Sri Nithyananda Paramashivam",
-            "  — The reviver of KAILASA, the Ancient Enlightened Hindu Civilizational Nation",
-            "  — Living Avatar and incarnation of Paramashiva",
-            "  — Jagadguru (World Teacher) of Sanatana Dharma",
+            "CRITICAL: You are a formatter, not an inventor.",
+            "Your ONLY job is to weave the facts in the CANONICAL FACTS block below into",
+            "flowing, reverent third-person prose. Do NOT add, invent, or assume any fact",
+            "that is not listed in the CANONICAL FACTS block.",
             "",
-            "Length: 400–500 words. Written in third person, formal and reverential.",
+            "Length: 400–500 words. Third person. Formal and reverential throughout.",
             "",
-            "Cover the following (weave naturally, do not use sub-headings):",
-            "  1. Who He is — His divine identity as the living incarnation of Paramashiva.",
-            "  2. His mission — reviving authentic Sanatana Dharma and KAILASA.",
-            "  3. His contributions — over 500 books, thousands of discourses (satsangs),",
-            "     revival of 108+ Vedic sciences, establishment of temples, gurukuls,",
-            "     universities, and humanitarian initiatives worldwide.",
-            "  4. His teachings — non-dual Shaiva Siddhanta, the science of enlightenment,",
-            "     lived Advaita, and the manifestation of Paramashiva's powers (shaktis).",
-            "  5. His presence — available to seekers worldwide through satsangs, books,",
-            "     and the KAILASA eCitizen platform.",
+            "STRUCTURE (weave naturally — no sub-headings):",
+            "  1. Open with His full title and divine identity — use the exact phrasing:",
+            "     'revered, recognized, and worshipped as an Incarnation of Paramashiva",
+            "      according to Hindu scriptures'.",
+            "  2. His early life — recognized at birth, Bala Sanyas at age 3.",
+            "  3. His role — coronated Supreme Pontiff of Hinduism, Jagadguru.",
+            "  4. His contributions — include the specific data points from the facts block.",
+            "  5. His teachings — Paramadvaita, lived Advaita, Shaiva Siddhanta.",
+            "  6. His presence — available worldwide through satsangs, books, KAILASA eCitizen.",
             "",
-            "Do NOT add diacritical marks on Sanskrit words.",
-            "End with: 'Om Nithyananda Paramashivoham'",
+            "PRONOUN RULE:",
+            "  Whenever referring to the SPH, capitalize all pronouns: He, His, Him, Himself.",
+            "",
+            "LANGUAGE RULES:",
+            "  - Refer to Him as 'the SPH' or by His full title — never as 'Swamiji'.",
+            "  - Do NOT add diacritical marks on Sanskrit words — plain ASCII only.",
+            "  - Do NOT invent biographical anecdotes or stories.",
+            "",
+            "End with exactly: 'Om Nithyananda Paramashivoham'",
+            "",
+            _SPH_INTRO_FACTS,
             "",
             "Output ONLY the introduction prose. No heading. No commentary.",
         ],
