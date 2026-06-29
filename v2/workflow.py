@@ -1218,6 +1218,52 @@ def strip_diacritics(state: "PipelineState") -> None:
     print(f"\n  Diacritics stripped from {removed} chapter(s) + all front/back matter")
 
 
+# ── Phase 5.66: Normalize terminology ────────────────────────────────────
+
+_TERMINOLOGY_REPLACEMENTS = [
+    # "Swamiji" → "the SPH"  (word-boundary aware, all forms)
+    (re.compile(r"\bSwamiji\b"), "the SPH"),
+    (re.compile(r"\bswamiji\b"), "the SPH"),
+    # "Shri Kailasa" / "Sri Kailasa" → "KAILASA"
+    (re.compile(r"\b[Ss]hri\s+[Kk]ailasa\b"), "KAILASA"),
+    (re.compile(r"\b[Ss]ri\s+[Kk]ailasa\b"), "KAILASA"),
+    # "SPAAH" → "the SPH" (typo seen in generated content)
+    (re.compile(r"\bSPAAH\b"), "the SPH"),
+    # "Shudha" → "Shuddha" (spelling normalisation)
+    (re.compile(r"\bShudha\b"), "Shuddha"),
+    (re.compile(r"\bshudha\b"), "shuddha"),
+]
+
+
+def normalize_terminology(state: "PipelineState") -> None:
+    """Normalise terminology across all generated text — chapters and front/back matter."""
+    def _fix(text: str) -> str:
+        for pattern, replacement in _TERMINOLOGY_REPLACEMENTS:
+            text = pattern.sub(replacement, text)
+        return text
+
+    changed_chapters = 0
+    for ch in (state.edited or {}).values():
+        fixed = _fix(ch.content_markdown)
+        if fixed != ch.content_markdown:
+            changed_chapters += 1
+        ch.content_markdown = fixed
+
+    for attr in (
+        "_foreword", "_benediction", "_sph_message", "_sph_intro",
+        "_kailasa_intro", "_back_cover", "_references",
+    ):
+        val = getattr(state, attr, "")
+        if val:
+            setattr(state, attr, _fix(val))
+
+    glossary = getattr(state, "_glossary", {})
+    if glossary:
+        state._glossary = {k: _fix(v) for k, v in glossary.items()}
+
+    print(f"\n  Terminology normalised across {changed_chapters} chapter(s) + all front/back matter")
+
+
 # ── Phase 5.7: Inject YouTube links into chapters ────────────────────────
 
 def inject_youtube_links(state: "PipelineState") -> None:
@@ -2157,6 +2203,9 @@ async def run_pipeline(
 
         # ── Phase 5.65: Strip diacritics ───────────────────────────────
         strip_diacritics(state)
+
+        # ── Phase 5.66: Normalize terminology ──────────────────────────
+        normalize_terminology(state)
 
         # ── Phase 5.7: Inject YouTube links into chapter footers ───────
         inject_youtube_links(state)
